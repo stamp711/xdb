@@ -1,0 +1,6 @@
+{
+    "dependencies": [
+        "libedit",
+        "catch2"
+    ]
+}
