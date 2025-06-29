@@ -6,12 +6,12 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
+#include <libxdb/process.hpp>
 #include <memory>
 #include <string_view>
 #include <vector>
-
-#include "libxdb/process.hpp"
 
 namespace {
 
@@ -50,6 +50,31 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
     return tokens;
 }
 
+void print_stop_reason(const xdb::process &process,
+                       const xdb::stop_reason &reason) {
+    std::cout << "Process " << process.pid() << " ";
+    const char *sig;
+    switch (reason.state) {
+        case xdb::process_state::running:
+            std::cout << "is running";
+            break;
+        case xdb::process_state::stopped:
+            sig = sigabbrev_np(reason.info);
+            std::cout << "stopped by signal: " << (sig ? sig : "UNKNOWN");
+            break;
+        case xdb::process_state::exited:
+            std::cout << "exited with status: " << reason.info;
+            break;
+        case xdb::process_state::terminated:
+            sig = sigabbrev_np(reason.info);
+            std::cout << "terminated by signal: " << (sig ? sig : "UNKNOWN");
+            break;
+        default:
+            std::cerr << "state unknown";
+    }
+    std::cout << std::endl;
+}
+
 void handle_command(std::unique_ptr<xdb::process> &process,
                     std::string_view line) {
     auto args = split(line, ' ');
@@ -57,7 +82,8 @@ void handle_command(std::unique_ptr<xdb::process> &process,
 
     if (command == "continue" || command == "c") {
         process->resume();
-        process->wait_on_signal();
+        auto reason = process->wait_on_signal();
+        print_stop_reason(*process, reason);
     } else {
         std::cerr << "Unknown command: " << command << std::endl;
     }
