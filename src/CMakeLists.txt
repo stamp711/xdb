@@ -1,4 +1,5 @@
-add_library(libxdb process.cpp)
+file(GLOB SRC_FILES "*.cpp")
+add_library(libxdb ${SRC_FILES})
 add_library(xdb::libxdb ALIAS libxdb)
 
 set_target_properties(

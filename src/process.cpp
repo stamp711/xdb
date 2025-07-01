@@ -4,12 +4,11 @@
 
 #include <iostream>
 #include <libxdb/error.hpp>
+#include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <memory>
 
-namespace xdb {
-
-std::unique_ptr<process> process::attach(pid_t pid) {
+std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     // Attaching to a process by PID
     if (pid <= 0) {
         error::send("Invalid PID");
@@ -25,11 +24,16 @@ std::unique_ptr<process> process::attach(pid_t pid) {
     return proc;
 }
 
-std::unique_ptr<process> process::launch(std::filesystem::path path) {
-    int pipefd[2];
-    if (pipe(pipefd) == -1) {
-        error::send_errno("pipe failed");
-    }
+void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
+    auto message = prefix + ": " + strerror(errno);
+    p.write(reinterpret_cast<const std::byte *>(message.data()),
+            message.size());
+    p.close_write();
+    ::exit(-1);
+}
+
+std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path) {
+    pipe p(true);  // Create a pipe with close-on-exec
 
     pid_t pid = fork();
     if (pid < 0) {
@@ -38,38 +42,25 @@ std::unique_ptr<process> process::launch(std::filesystem::path path) {
 
     if (pid == 0) {
         // Child process
-        try {
-            // Close read-end of the pipe
-            close(pipefd[0]);
-            // Close-on-exec for the write-end
-            fcntl(pipefd[1], F_SETFD, fcntl(pipefd[1], F_GETFD) | FD_CLOEXEC);
+        p.close_read();
 
-            // TRACEME
-            if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
-                error::send_errno("PTRACE_TRACEME failed");
-            }
-
-            // Exec
-            execlp(path.c_str(), path.c_str(), nullptr);
-            error::send_errno("Exec failed");
-
-        } catch (const std::exception &e) {
-            // Catch all exceptions in child process
-            write(pipefd[1], "X", 1);  // Write error message to pipe
-            std::cerr << "Exception in forked child process: " << e.what()
-                      << std::endl;
-            std::exit(-1);  // Exit child process
+        if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
+            exit_with_perror(p, "PTRACE_TRACEME failed");
         }
+
+        execlp(path.c_str(), path.c_str(), nullptr);
+        exit_with_perror(p, "Exec failed");
     }
 
     // Parent process
-    close(pipefd[1]);  // Close write end of the pipe
-    char buf;
-    ssize_t n = read(pipefd[0], &buf, 1);
-    close(pipefd[0]);  // Close read end of the pipe
+    p.close_write();  // Close write so our read() won't block
+    auto data = p.read();
+    p.close_read();
 
-    if (n != 0) {  // -1 is error, 0 is EOF
-        error::send("Child process exec failed");
+    if (!data.empty()) {
+        waitpid(pid, nullptr, 0);  // Wait for child to exit
+        auto child_message = std::string(data.begin(), data.end());
+        error::send("Child process error: " + child_message);
     }
 
     // Child process exec succeeded
@@ -78,7 +69,7 @@ std::unique_ptr<process> process::launch(std::filesystem::path path) {
     return proc;
 }
 
-process::~process() {
+xdb::process::~process() {
     if (pid_ <= 0) {
         return;
     }
@@ -86,14 +77,11 @@ process::~process() {
     // If the process is running, we need to stop it before detaching
     if (state_ == process_state::running) {
         kill(pid_, SIGSTOP);
-        waitpid(pid_, nullptr, 0);
+        this->wait_on_signal();
     }
 
     // Detach from the process
-    if (ptrace(PTRACE_DETACH, pid_, nullptr, nullptr) == -1) {
-        std::cerr << "WARN: PTRACE_DETACH failed for PID " << pid_ << ": "
-                  << strerror(errno) << std::endl;
-    }
+    ptrace(PTRACE_DETACH, pid_, nullptr, nullptr);
 
     // Terminate the process if needed
     if (terminate_on_destruction_) {
@@ -102,18 +90,18 @@ process::~process() {
             std::cerr << "WARN: Failed to kill process " << pid_ << ": "
                       << strerror(errno) << std::endl;
         }
-        waitpid(pid_, nullptr, 0);
+        this->wait_on_signal();
     }
 }
 
-void process::resume() {
+void xdb::process::resume() {
     if (ptrace(PTRACE_CONT, pid_, nullptr, nullptr) == -1) {
         error::send_errno("PTRACE_CONT failed");
     }
     state_ = process_state::running;
 }
 
-stop_reason process::wait_on_signal() {
+xdb::stop_reason xdb::process::wait_on_signal() {
     int wait_status;
     if (waitpid(pid_, &wait_status, 0) < 0) {
         error::send_errno("waitpid failed");
@@ -125,7 +113,7 @@ stop_reason process::wait_on_signal() {
     return reason;
 }
 
-stop_reason::stop_reason(int wait_status) {
+xdb::stop_reason::stop_reason(int wait_status) {
     if (WIFSTOPPED(wait_status)) {
         state = process_state::stopped;
         info = WSTOPSIG(wait_status);
@@ -143,5 +131,3 @@ stop_reason::stop_reason(int wait_status) {
         info = 0;
     }
 }
-
-}  // namespace xdb
