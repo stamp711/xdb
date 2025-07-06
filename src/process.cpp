@@ -2,6 +2,7 @@
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 
+#include <cstddef>
 #include <iostream>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
@@ -18,7 +19,7 @@ std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
         error::send_errno("PTRACE_ATTACH failed");
     }
 
-    std::unique_ptr<process> proc(new process(pid, false));
+    std::unique_ptr<process> proc(new process(pid, false, true));
     proc->wait_on_signal();
 
     return proc;
@@ -32,7 +33,8 @@ void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
     ::exit(-1);
 }
 
-std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path) {
+std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path,
+                                                   bool debug) {
     pipe p(true);  // Create a pipe with close-on-exec
 
     pid_t pid = fork();
@@ -44,7 +46,7 @@ std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path) {
         // Child process
         p.close_read();
 
-        if (ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
+        if (debug && ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
             exit_with_perror(p, "PTRACE_TRACEME failed");
         }
 
@@ -64,8 +66,8 @@ std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path) {
     }
 
     // Child process exec succeeded
-    std::unique_ptr<process> proc(new process(pid, true));
-    proc->wait_on_signal();
+    std::unique_ptr<process> proc(new process(pid, true, debug));
+    if (debug) proc->wait_on_signal();
     return proc;
 }
 
@@ -74,14 +76,15 @@ xdb::process::~process() {
         return;
     }
 
-    // If the process is running, we need to stop it before detaching
-    if (state_ == process_state::running) {
-        kill(pid_, SIGSTOP);
-        this->wait_on_signal();
+    if (is_attached_) {
+        // If the process is running, we need to stop it before detaching
+        if (state_ == process_state::running) {
+            kill(pid_, SIGSTOP);
+            waitpid(pid_, nullptr, 0);
+        }
+        ptrace(PTRACE_DETACH, pid_, nullptr, nullptr);
+        kill(pid_, SIGCONT);
     }
-
-    // Detach from the process
-    ptrace(PTRACE_DETACH, pid_, nullptr, nullptr);
 
     // Terminate the process if needed
     if (terminate_on_destruction_) {
@@ -90,7 +93,7 @@ xdb::process::~process() {
             std::cerr << "WARN: Failed to kill process " << pid_ << ": "
                       << strerror(errno) << std::endl;
         }
-        this->wait_on_signal();
+        waitpid(pid_, nullptr, 0);
     }
 }
 

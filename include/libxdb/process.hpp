@@ -16,7 +16,8 @@ struct stop_reason {
 
 class process {
    public:
-    static std::unique_ptr<process> launch(std::filesystem::path path);
+    static std::unique_ptr<process> launch(std::filesystem::path path,
+                                           bool debug = true);
     static std::unique_ptr<process> attach(pid_t pid);
 
     void resume();
@@ -31,11 +32,14 @@ class process {
     ~process();
 
    private:
-    process(pid_t pid, bool terminate_on_destruction)
-        : pid_(pid), terminate_on_destruction_(terminate_on_destruction) {}
+    process(pid_t pid, bool terminate_on_destruction, bool is_attached)
+        : pid_(pid),
+          terminate_on_destruction_(terminate_on_destruction),
+          is_attached_(is_attached) {}
 
     pid_t pid_ = 0;
     bool terminate_on_destruction_ = true;
+    bool is_attached_ = true;
     process_state state_ = process_state::stopped;
 };
 
