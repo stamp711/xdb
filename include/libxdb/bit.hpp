@@ -25,14 +25,14 @@ const std::byte* as_bytes(const T& value) {
 
 template <class T>
 byte128 to_byte128(const T& value) {
-    byte128 res;
+    byte128 res{};
     std::memcpy(res.data(), &value, sizeof(T));
     return res;
 }
 
 template <class T>
 byte64 to_byte64(const T& value) {
-    byte64 res;
+    byte64 res{};
     std::memcpy(res.data(), &value, sizeof(T));
     return res;
 }

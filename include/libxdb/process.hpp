@@ -33,6 +33,8 @@ class process {
     registers &get_registers() { return *registers_; }
     const registers &get_registers() const { return *registers_; }
     void write_user_area(std::size_t offset, std::uint64_t data);
+    void write_gprs(const user_regs_struct &gprs);
+    void write_fprs(const user_fpregs_struct &fprs);
 
     // -- forbid default construct and copy --
     process() = delete;

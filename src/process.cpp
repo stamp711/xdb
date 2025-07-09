@@ -90,10 +90,7 @@ xdb::process::~process() {
     // Terminate the process if needed
     if (terminate_on_destruction_) {
         // If the process is set to terminate on destruction, we kill it
-        if (kill(pid_, SIGKILL) == -1) {
-            std::cerr << "WARN: Failed to kill process " << pid_ << ": "
-                      << strerror(errno) << std::endl;
-        }
+        kill(pid_, SIGKILL);
         waitpid(pid_, nullptr, 0);
     }
 }
@@ -173,5 +170,17 @@ void xdb::process::read_all_registers() {
 void xdb::process::write_user_area(std::size_t offset, std::uint64_t data) {
     if (ptrace(PTRACE_POKEUSER, pid_, offset, data) == -1) {
         error::send_errno("PTRACE_POKEUSER failed");
+    }
+}
+
+void xdb::process::write_gprs(const user_regs_struct &gprs) {
+    if (ptrace(PTRACE_SETREGS, pid_, nullptr, &gprs) == -1) {
+        error::send_errno("PTRACE_SETREGS failed");
+    }
+}
+
+void xdb::process::write_fprs(const user_fpregs_struct &fprs) {
+    if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
+        error::send_errno("PTRACE_SETFPREGS failed");
     }
 }
