@@ -3,7 +3,6 @@
 #include <sys/wait.h>
 
 #include <cstddef>
-#include <iostream>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
@@ -34,8 +33,9 @@ void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
     ::exit(-1);
 }
 
-std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path,
-                                                   bool debug) {
+std::unique_ptr<xdb::process> xdb::process::launch(
+    std::filesystem::path path, bool debug,
+    std::optional<int> stdout_replacement) {
     pipe p(true);  // Create a pipe with close-on-exec
 
     pid_t pid = fork();
@@ -46,6 +46,13 @@ std::unique_ptr<xdb::process> xdb::process::launch(std::filesystem::path path,
     if (pid == 0) {
         // Child process
         p.close_read();
+
+        if (stdout_replacement) {
+            // Redirect stdout to the specified file descriptor
+            if (dup2(*stdout_replacement, STDOUT_FILENO) == -1) {
+                exit_with_perror(p, "dup2 failed for stdout");
+            }
+        }
 
         if (debug && ptrace(PTRACE_TRACEME, 0, nullptr, nullptr) == -1) {
             exit_with_perror(p, "PTRACE_TRACEME failed");

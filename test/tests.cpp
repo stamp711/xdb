@@ -1,9 +1,13 @@
 #include <signal.h>
 
 #include <catch2/catch_test_macros.hpp>
+#include <filesystem>
 #include <fstream>
+#include <libxdb/bit.hpp>
 #include <libxdb/error.hpp>
+#include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
+#include <libxdb/register_info.hpp>
 #include <string>
 
 namespace {
@@ -19,6 +23,15 @@ char get_process_status(pid_t pid) {
     return data[data.rfind(')') + 2];
 }
 
+std::filesystem::path test_path() {
+    char exe_path[1024];
+    ssize_t count = readlink("/proc/self/exe", exe_path, sizeof(exe_path));
+    if (count == -1) {
+        throw std::runtime_error("Failed to read /proc/self/exe");
+    }
+    return std::filesystem::path(exe_path).parent_path();
+}
+
 }  // namespace
 
 TEST_CASE("process::launch success", "[process]") {
@@ -28,11 +41,13 @@ TEST_CASE("process::launch success", "[process]") {
 }
 
 TEST_CASE("process::launch failure", "[process]") {
-    REQUIRE_THROWS_AS(xdb::process::launch("/bin/doesnotexist"), xdb::error);
+    REQUIRE_THROWS_AS(xdb::process::launch(test_path() / "/bin/doesnotexist"),
+                      xdb::error);
 }
 
 TEST_CASE("process::attach success", "[process]") {
-    auto launched = xdb::process::launch("targets/run_endlessly", false);
+    auto launched =
+        xdb::process::launch(test_path() / "targets/run_endlessly", false);
     auto attached = xdb::process::attach(launched->pid());
     REQUIRE(get_process_status(launched->pid()) == 't');
 }
@@ -42,14 +57,48 @@ TEST_CASE("process::attach invalid PID", "[process]") {
 }
 
 TEST_CASE("process::resume success", "[process]") {
-    auto proc = xdb::process::launch("targets/run_endlessly");
+    auto proc = xdb::process::launch(test_path() / "targets/run_endlessly");
     proc->resume();
     REQUIRE(get_process_status(proc->pid()) == 'R');
 }
 
 TEST_CASE("process::resume already terminated", "[process]") {
-    auto proc = xdb::process::launch("targets/end_immediately");
+    auto proc = xdb::process::launch(test_path() / "targets/end_immediately");
     proc->resume();
     proc->wait_on_signal();
     REQUIRE_THROWS_AS(proc->resume(), xdb::error);
+}
+
+TEST_CASE("Write register works", "[register]") {
+    xdb::pipe channel(false);
+
+    auto proc = xdb::process::launch(test_path() / "targets/reg_write", true,
+                                     channel.get_write());
+    channel.close_write();
+
+    // Wait for the process to trap itself
+    proc->resume();
+    proc->wait_on_signal();
+
+    // GPR rsi
+    auto& regs = proc->get_registers();
+    regs.write_by_id(xdb::register_id::rsi, 0xdeadbeef);
+    proc->resume();
+    proc->wait_on_signal();
+    auto output = channel.read();
+    REQUIRE(xdb::to_string_view(output) == "0xdeadbeef");
+
+    // MMX mm0
+    regs.write_by_id(xdb::register_id::mm0, 0xba5eba11);
+    proc->resume();
+    proc->wait_on_signal();
+    output = channel.read();
+    REQUIRE(xdb::to_string_view(output) == "0xba5eba11");
+
+    // SSE xmm0
+    regs.write_by_id(xdb::register_id::xmm0, 42.24);
+    proc->resume();
+    proc->wait_on_signal();
+    output = channel.read();
+    REQUIRE(xdb::to_string_view(output) == "42.24");
 }
