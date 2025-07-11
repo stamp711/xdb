@@ -5,6 +5,7 @@
 .section .rodata
 hex_format: .asciz "%#x"
 float_format: .asciz "%.2f"
+long_float_format: .asciz "%.2Lf"
 
 .section .text
 
@@ -51,6 +52,16 @@ main:
     lea rdi, [rip + float_format]
     mov rax, 1 # we have one argument in XMM registers
     printf_fflush
+
+    trap
+
+    # Print st0
+    sub rsp, 16
+    fstp tbyte ptr [rsp]
+    lea rdi, [rip + long_float_format]
+    xor rax, rax
+    printf_fflush
+    add rsp, 16
 
     trap
 

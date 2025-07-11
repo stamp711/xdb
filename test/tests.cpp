@@ -101,4 +101,18 @@ TEST_CASE("Write register works", "[register]") {
     proc->wait_on_signal();
     output = channel.read();
     REQUIRE(xdb::to_string_view(output) == "42.24");
+
+    // x87 st0
+    regs.write_by_id(xdb::register_id::st0, 12.21L);
+    regs.write_by_id(
+        xdb::register_id::fsw,
+        std::uint16_t{
+            0b0011100000000000});  // bits 11-13 track top of the stack
+    regs.write_by_id(
+        xdb::register_id::ftw,
+        std::uint16_t{0b0011111111111111});  // 00 means valid, 11 means empty
+    proc->resume();
+    proc->wait_on_signal();
+    output = channel.read();
+    REQUIRE(xdb::to_string_view(output) == "12.21");
 }
