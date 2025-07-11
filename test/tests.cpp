@@ -8,6 +8,7 @@
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
+#include <libxdb/types.hpp>
 #include <string>
 
 namespace {
@@ -115,4 +116,54 @@ TEST_CASE("Write register works", "[register]") {
     proc->wait_on_signal();
     output = channel.read();
     REQUIRE(xdb::to_string_view(output) == "12.21");
+}
+
+TEST_CASE("Read registers", "[register]") {
+    auto proc = xdb::process::launch(test_path() / "targets/reg_read");
+    auto& regs = proc->get_registers();
+
+    // r13
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<std::uint64_t>(xdb::register_id::r13) ==
+            0xdeadbeefcafebabe);
+
+    // r13d
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<std::uint32_t>(xdb::register_id::r13d) ==
+            0xabcdef01);
+
+    // r13w
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<std::uint16_t>(xdb::register_id::r13w) ==
+            0x1234);
+
+    // r13b
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<std::uint8_t>(xdb::register_id::r13b) == 42);
+
+    // ah
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<std::uint8_t>(xdb::register_id::ah) == 41);
+
+    // mm0
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<xdb::byte64>(xdb::register_id::mm0) ==
+            xdb::to_byte64(0xba5eba11));
+
+    // xmm0
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<xdb::byte128>(xdb::register_id::xmm0) ==
+            xdb::to_byte128(42.25));
+
+    // st0
+    proc->resume();
+    proc->wait_on_signal();
+    REQUIRE(regs.read_by_id_as<long double>(xdb::register_id::st0) == 42.25L);
 }
