@@ -23,8 +23,8 @@
     DEFINE_REGISTER(name, -1, 1, GPR_OFFSET(super), register_type::sub_gpr, \
                     register_format::uint)
 
-#define DEFINE_GPR_8H(name, super)                      \
-    DEFINE_REGISTER(name, -1, 1, GPR_OFFSET(super) + 1, \
+#define DEFINE_GPR_8H(name, super)                        \
+    DEFINE_REGISTER(name, -1, 1, (GPR_OFFSET(super) + 1), \
                     register_type::sub_gpr, register_format::uint)
 
 // clang-format off
@@ -69,17 +69,19 @@ DEFINE_GPR_64(orig_rax, -1),
                     FPR_OFFSET(user_name), register_type::fpr, \
                     register_format::uint)
 
-#define DEFINE_FP_ST(number)                                                   \
-    DEFINE_REGISTER(st##number, 33 + number, 16, FPR_OFFSET(st_space[number]), \
-                    register_type::fpr, register_format::long_double)
+#define DEFINE_FP_ST(number)                                                  \
+    DEFINE_REGISTER(st##number, (33 + number), 16,                            \
+                    (FPR_OFFSET(st_space) + number * 16), register_type::fpr, \
+                    register_format::long_double)
 
-#define DEFINE_FP_MM(number)                                                   \
-    DEFINE_REGISTER(mm##number, 41 + number, 8, FPR_OFFSET(xmm_space[number]), \
-                    register_type::fpr, register_format::vector)
+#define DEFINE_FP_MM(number)                                                  \
+    DEFINE_REGISTER(mm##number, (41 + number), 8,                             \
+                    (FPR_OFFSET(st_space) + number * 16), register_type::fpr, \
+                    register_format::vector)
 
-#define DEFINE_FP_XMM(number)                                          \
-    DEFINE_REGISTER(xmm##number, 17 + number, 16,                      \
-                    FPR_OFFSET(xmm_space[number]), register_type::fpr, \
+#define DEFINE_FP_XMM(number)                                                  \
+    DEFINE_REGISTER(xmm##number, (17 + number), 16,                            \
+                    (FPR_OFFSET(xmm_space) + number * 16), register_type::fpr, \
                     register_format::vector)
 
     // clang-format off
