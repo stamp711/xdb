@@ -1,5 +1,7 @@
 #include <editline/readline.h>
 #include <fcntl.h>
+#include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -8,9 +10,13 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <libxdb/parse.hpp>
 #include <libxdb/process.hpp>
+#include <libxdb/register_info.hpp>
+#include <libxdb/registers.hpp>
 #include <memory>
 #include <string_view>
+#include <type_traits>
 #include <vector>
 
 namespace {
@@ -75,19 +81,136 @@ void print_stop_reason(const xdb::process &process,
     std::cout << std::endl;
 }
 
+void print_help(const std::vector<std::string> &args) {
+    if (args.size() == 1) {
+        std::cout << "Available commands:\n"
+                  << "  help, h          - Show this help message\n"
+                  << "  continue, c      - Resume the process\n"
+                  << "  register         - Register a new command (not "
+                     "implemented)\n";
+    } else if (args[1] == "register") {
+        std::cout << "Usage:" << std::endl
+                  << "    register read" << std::endl
+                  << "    register read <register>" << std::endl
+                  << "    register read all" << std::endl
+                  << "    register write <register> <value>" << std::endl;
+    } else {
+        std::cerr << "Unknown command: " << args[1] << std::endl;
+    }
+}
+
+void handle_register_read(xdb::process &process,
+                          const std::vector<std::string> &args) {
+    auto format = [](auto t) {
+        if constexpr (std::is_floating_point_v<decltype(t)>) {
+            return fmt::format("{}", t);
+        } else if constexpr (std::is_integral_v<decltype(t)>) {
+            return fmt::format("{:#0{}x}", t, sizeof(t) * 2 + 2);
+        } else {  // byte64 & byte128 -> std::array<std::byte, _>
+            return fmt::format("[{:#04x}]", fmt::join(t, ", "));
+        }
+    };
+
+    if (args.size() == 2 || (args.size() == 3 && args[2] == "all")) {
+        auto all = args.size() == 3;
+        for (const auto &info : xdb::g_register_infos) {
+            auto is_gpr = info.type == xdb::register_type::gpr &&
+                          info.id != xdb::register_id::orig_rax;
+            auto should_print = all || is_gpr;
+            if (should_print) {
+                auto value = process.get_registers().read(info);
+                fmt::println("{}:\t{}", info.name, std::visit(format, value));
+            }
+        }
+    } else if (args.size() == 3) {
+        try {
+            auto info = xdb::register_info_by_name(args[2]);
+            auto value = process.get_registers().read(info);
+            fmt::println("{}:\t{}", info.name, std::visit(format, value));
+        } catch (const xdb::error &e) {
+            std::cerr << "No such register" << std::endl;
+        }
+    } else {
+        print_help({"help", "register"});
+    }
+}
+
+xdb::registers::value parse_register_value(const xdb::register_info &info,
+                                           const std::string &s) {
+    try {
+        switch (info.format) {
+            case xdb::register_format::uint:
+                switch (info.size) {
+                    case 1:
+                        return xdb::to_integral<std::uint8_t>(s).value();
+                    case 2:
+                        return xdb::to_integral<std::uint16_t>(s).value();
+                    case 4:
+                        return xdb::to_integral<std::uint32_t>(s).value();
+                    case 8:
+                        return xdb::to_integral<std::uint64_t>(s).value();
+                }
+                break;
+            case xdb::register_format::double_float:
+                return xdb::to_float<double>(s).value();
+            case xdb::register_format::long_double:
+                return xdb::to_float<long double>(s).value();
+            case xdb::register_format::vector:
+                if (info.size == 8) {
+                    return xdb::parse_vector<8>(s);
+                }
+        }
+    } catch (...) {
+    }
+    xdb::error::send("Invalid format");
+}
+
+void handle_register_write(xdb::process &process,
+                           const std::vector<std::string> &args) {
+    if (args.size() != 4) {
+        print_help({"help", "register"});
+        return;
+    }
+    try {
+        auto info = xdb::register_info_by_name(args[2]);
+        auto value = parse_register_value(info, args[3]);
+        process.get_registers().write(info, value);
+    } catch (const xdb::error &e) {
+        std::cerr << "Error writing to register: " << e.what() << std::endl;
+    }
+}
+
+void handle_register_command(xdb::process &process,
+                             const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        print_help({"help", "register"});
+    } else if (args[1] == "read") {
+        handle_register_read(process, args);
+    } else if (args[1] == "write") {
+        handle_register_write(process, args);
+    } else {
+        print_help({"help", "register"});
+    }
+}
+
 void handle_command(std::unique_ptr<xdb::process> &process,
                     std::string_view line) {
     auto args = split(line, ' ');
     auto command = args[0];
 
-    if (command == "continue" || command == "c") {
+    if (command == "help" || command == "h") {
+        print_help(args);
+    } else if (command == "continue" || command == "c") {
         process->resume();
         auto reason = process->wait_on_signal();
         print_stop_reason(*process, reason);
+    } else if (command == "register" || command == "reg") {
+        handle_register_command(*process, args);
     } else {
         std::cerr << "Unknown command: " << command << std::endl;
     }
 }
+
 }  // namespace
 
 int run(int argc, const char *argv[]) {
