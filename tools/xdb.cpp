@@ -1,5 +1,6 @@
 #include <editline/readline.h>
 #include <fcntl.h>
+#include <fmt/base.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
 #include <sys/ptrace.h>
@@ -58,27 +59,28 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
 
 void print_stop_reason(const xdb::process &process,
                        const xdb::stop_reason &reason) {
-    std::cout << "Process " << process.pid() << " ";
+    std::string message;
     const char *sig;
     switch (reason.state) {
         case xdb::process_state::running:
-            std::cout << "is running";
+            message = "is running";
             break;
         case xdb::process_state::stopped:
             sig = sigabbrev_np(reason.info);
-            std::cout << "stopped by signal: " << (sig ? sig : "UNKNOWN");
+            message = fmt::format("stopped by signal {} at {:#x}", sig,
+                                  process.get_pc().addr());
             break;
         case xdb::process_state::exited:
-            std::cout << "exited with status: " << reason.info;
+            message = fmt::format("exited with status {}", reason.info);
             break;
         case xdb::process_state::terminated:
             sig = sigabbrev_np(reason.info);
-            std::cout << "terminated by signal: " << (sig ? sig : "UNKNOWN");
+            message = fmt::format("terminated by signal {}", sig);
             break;
         default:
-            std::cerr << "state unknown";
+            message = "state is unknown";
     }
-    std::cout << std::endl;
+    fmt::println("Process {} {}", process.pid(), message);
 }
 
 void print_help(const std::vector<std::string> &args) {

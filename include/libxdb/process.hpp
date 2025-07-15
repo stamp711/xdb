@@ -4,7 +4,10 @@
 
 #include <filesystem>
 #include <libxdb/registers.hpp>
+#include <libxdb/types.hpp>
 #include <memory>
+
+#include "libxdb/register_info.hpp"
 
 namespace xdb {
 
@@ -37,6 +40,11 @@ class process {
     void write_user_area(std::size_t offset, std::uint64_t data);
     void write_gprs(const user_regs_struct &gprs);
     void write_fprs(const user_fpregs_struct &fprs);
+
+    virt_addr get_pc() const {
+        return virt_addr(
+            get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
+    }
 
     // -- forbid default construct and copy --
     process() = delete;
