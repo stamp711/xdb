@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 
 namespace xdb {
 
@@ -40,5 +41,9 @@ class virt_addr {
    private:
     std::uint64_t addr_ = 0;
 };
+
+inline std::string to_string(const xdb::virt_addr& va) {
+    return std::format("{:#x}", va.addr());
+}
 
 }  // namespace xdb

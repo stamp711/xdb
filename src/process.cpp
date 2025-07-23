@@ -1,13 +1,16 @@
 #include <fcntl.h>
+#include <sys/personality.h>
 #include <sys/ptrace.h>
 #include <sys/wait.h>
 
 #include <cstddef>
+#include <libxdb/breakpoint_site.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
 #include <memory>
+#include <string>
 
 std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     // Attaching to a process by PID
@@ -47,9 +50,11 @@ std::unique_ptr<xdb::process> xdb::process::launch(
         // Child process
         p.close_read();
 
+        ::personality(ADDR_NO_RANDOMIZE);  // Disable ASLR
+
         if (stdout_replacement) {
             // Redirect stdout to the specified file descriptor
-            if (dup2(*stdout_replacement, STDOUT_FILENO) == -1) {
+            if (::dup2(*stdout_replacement, STDOUT_FILENO) == -1) {
                 exit_with_perror(p, "dup2 failed for stdout");
             }
         }
@@ -103,6 +108,22 @@ xdb::process::~process() {
 }
 
 void xdb::process::resume() {
+    // Single step the breakpoint if it was hit
+    auto pc = get_pc();
+    if (breakpoint_sites_.enabled_stoppoint_address(pc)) {
+        auto &bp = breakpoint_sites_.get_by_address(pc);
+        bp.disable();  // Disable the breakpoint
+        // Single step the process
+        if (ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr) == -1) {
+            error::send_errno("PTRACE_SINGLESTEP failed");
+        }
+        // Wait for the process to stop again
+        if (waitpid(pid_, nullptr, 0) < 0) {
+            error::send_errno("waitpid failed");
+        }
+        bp.enable();  // Re-enable the breakpoint
+    }
+
     if (ptrace(PTRACE_CONT, pid_, nullptr, nullptr) == -1) {
         error::send_errno("PTRACE_CONT failed");
     }
@@ -122,6 +143,41 @@ xdb::stop_reason xdb::process::wait_on_signal() {
     // If the process is stopped, read all registers
     if (is_attached_ && state_ == process_state::stopped) {
         read_all_registers();
+
+        // If stop caused by a xdb breakpoint, revert pc to breakpoint address
+        // NOTE: if the breakpoint is not created by xdb, pc will remain to be
+        // the next instruction
+        auto prev = get_pc() - 1;
+        if (reason.info == SIGTRAP &&
+            breakpoint_sites_.enabled_stoppoint_address(prev)) {
+            set_pc(prev);
+        }
+    }
+
+    return reason;
+}
+
+xdb::stop_reason xdb::process::step_instruction() {
+    // If we are stopped at a breakpoint, restore it to the original instruction
+    // before stepping
+    auto pc = get_pc();
+    std::optional<breakpoint_site *> bp_to_reenable;
+    if (breakpoint_sites_.enabled_stoppoint_address(pc)) {
+        auto &bp = breakpoint_sites_.get_by_address(pc);
+        bp.disable();
+        bp_to_reenable = &bp;
+        ::printf("disabled");
+    }
+
+    if (::ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr) == -1) {
+        error::send_errno("PTRACE_SINGLESTEP failed");
+    }
+    auto reason = wait_on_signal();
+
+    // Re-enable the breakpoint
+    if (bp_to_reenable) {
+        (*bp_to_reenable)->enable();
+        ::printf("enabled");
     }
 
     return reason;
@@ -130,11 +186,11 @@ xdb::stop_reason xdb::process::wait_on_signal() {
 xdb::stop_reason::stop_reason(int wait_status) {
     if (WIFSTOPPED(wait_status)) {
         state = process_state::stopped;
-        info = WSTOPSIG(wait_status);
+        info = static_cast<uint8_t>(WSTOPSIG(wait_status));
 
     } else if (WIFEXITED(wait_status)) {
         state = process_state::exited;
-        info = WEXITSTATUS(wait_status);
+        info = static_cast<uint8_t>(WEXITSTATUS(wait_status));
 
     } else if (WIFSIGNALED(wait_status)) {
         state = process_state::terminated;
@@ -165,7 +221,8 @@ void xdb::process::read_all_registers() {
         auto offset = register_info_by_id(static_cast<register_id>(id)).offset;
 
         errno = 0;  // Reset errno before each ptrace call
-        std::int64_t data = ptrace(PTRACE_PEEKUSER, pid_, offset, nullptr);
+        std::uint64_t data = static_cast<std::uint64_t>(
+            ptrace(PTRACE_PEEKUSER, pid_, offset, nullptr));
         if (errno != 0) {
             error::send_errno("PTRACE_PEEKUSER failed for debug register");
         }
@@ -190,4 +247,14 @@ void xdb::process::write_fprs(const user_fpregs_struct &fprs) {
     if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
         error::send_errno("PTRACE_SETFPREGS failed");
     }
+}
+
+xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address) {
+    if (breakpoint_sites_.contains_address(address)) {
+        error::send("Breakpoint site already exists at address " +
+                    std::to_string(address.addr()));
+    }
+    auto bp_site =
+        std::unique_ptr<breakpoint_site>(new breakpoint_site(*this, address));
+    return breakpoint_sites_.push(std::move(bp_site));
 }

@@ -1,8 +1,11 @@
-add_executable(run_endlessly run_endlessly.cpp)
-add_executable(end_immediately end_immediately.cpp)
+function(add_test_target target_name source_file)
+    add_executable(${target_name} ${source_file})
+    target_compile_options(${target_name} PRIVATE -g -O0 -pie)
+    add_dependencies(tests ${target_name})
+endfunction()
 
-add_executable(reg_write reg_write.s)
-target_compile_options(reg_write PRIVATE -pie)
-
-add_executable(reg_read reg_read.s)
-target_compile_options(reg_read PRIVATE -pie)
+add_test_target(hello hello.cpp)
+add_test_target(run_endlessly run_endlessly.cpp)
+add_test_target(end_immediately end_immediately.cpp)
+add_test_target(reg_write reg_write.s)
+add_test_target(reg_read reg_read.s)

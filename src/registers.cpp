@@ -111,7 +111,7 @@ void xdb::registers::write(const register_info& info, value val) {
         // so we write all FPRs at once.
         proc_->write_fprs(data_.i387);
     } else {
-        auto aligned_offset = info.offset & ~0b111;  // Align to 8 bytes
+        auto aligned_offset = info.offset & ~0b111ull;  // Align to 8 bytes
         proc_->write_user_area(
             aligned_offset,
             from_bytes<std::uint64_t>(user_bytes + aligned_offset));

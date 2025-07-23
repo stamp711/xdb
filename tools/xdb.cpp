@@ -20,6 +20,9 @@
 #include <type_traits>
 #include <vector>
 
+#include "libxdb/breakpoint_site.hpp"
+#include "libxdb/types.hpp"
+
 namespace {
 
 std::unique_ptr<xdb::process> attach(int argc, const char *argv[]) {
@@ -86,16 +89,31 @@ void print_stop_reason(const xdb::process &process,
 void print_help(const std::vector<std::string> &args) {
     if (args.size() == 1) {
         std::cout << "Available commands:\n"
-                  << "  help, h          - Show this help message\n"
-                  << "  continue, c      - Resume the process\n"
-                  << "  register         - Register a new command (not "
-                     "implemented)\n";
+                  << "    help, h          - Show this help message\n"
+                  << "    breakpoint, b    - Manage breakpoints\n"
+                  << "    continue, c      - Resume the process\n"
+                  << "    register, reg    - Register operations\n"
+                  << "    stepi, si        - Single step an instruction\n";
+    } else if (args[1] == "breakpoint") {
+        std::cout
+            << "Manage breakpoints.\n"
+            << "Usage:\n"
+            << "    breakpoint list             - List all breakpoints\n"
+            << "    breakpoint set <address>    - Set a breakpoint at the "
+               "specified address\n"
+            << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
+            << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
+            << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
+    } else if (args[1] == "continue") {
+        std::cout << "Resume the process.\n";
     } else if (args[1] == "register") {
-        std::cout << "Usage:" << std::endl
-                  << "    register read" << std::endl
-                  << "    register read <register>" << std::endl
-                  << "    register read all" << std::endl
-                  << "    register write <register> <value>" << std::endl;
+        std::cout << "Usage:\n"
+                  << "    register read\n"
+                  << "    register read <register>\n"
+                  << "    register read all\n"
+                  << "    register write <register> <value>\n";
+    } else if (args[1] == "stepi") {
+        std::cout << "Single step an instruction\n";
     } else {
         std::cerr << "Unknown command: " << args[1] << std::endl;
     }
@@ -195,6 +213,64 @@ void handle_register_command(xdb::process &process,
     }
 }
 
+void handle_breakpoint_command(xdb::process &process,
+                               const std::vector<std::string> args) {
+    auto phelp = []() { print_help({"help", "breakpoint"}); };
+
+    if (args.size() < 2) {
+        phelp();
+        return;
+    }
+
+    auto cmd = args[1];
+    if (cmd == "list") {
+        if (process.breakpoint_sites().empty()) {
+            fmt::println("No breakpoints set.");
+        } else {
+            fmt::println("Breakpoints:");
+            process.breakpoint_sites().for_each([](const auto &bp) {
+                fmt::println("{}: address = {:#x}, {}", bp.id(),
+                             bp.address().addr(),
+                             bp.is_enabled() ? "enabled" : "disabled");
+            });
+        }
+        return;
+    } else if (cmd == "set") {
+        if (args.size() < 3) {
+            phelp();
+            return;
+        }
+        auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+        if (!address) {
+            fmt::println("Address is expected in 0xhex format");
+            return;
+        }
+        process.create_breakpoint_site(xdb::virt_addr{*address}).enable();
+        return;
+    }
+
+    if (args.size() < 3) {
+        phelp();
+        return;
+    }
+    auto id = xdb::to_integral<xdb::breakpoint_site::id_type>(args[2]);
+    if (!id) {
+        fmt::println("Command expects valid breakpoint ID");
+        return;
+    }
+
+    if (cmd == "enable") {
+        process.breakpoint_sites().get_by_id(*id).enable();
+    } else if (cmd == "disable") {
+        process.breakpoint_sites().get_by_id(*id).disable();
+    } else if (cmd == "delete") {
+        process.breakpoint_sites().remove_by_id(*id);
+    } else {
+        fmt::println("Unknown breakpoint command: {}", cmd);
+        phelp();
+    }
+}
+
 void handle_command(std::unique_ptr<xdb::process> &process,
                     std::string_view line) {
     auto args = split(line, ' ');
@@ -202,13 +278,20 @@ void handle_command(std::unique_ptr<xdb::process> &process,
 
     if (command == "help" || command == "h") {
         print_help(args);
+    } else if (command == "breakpoint" || command == "b") {
+        handle_breakpoint_command(*process, args);
     } else if (command == "continue" || command == "c") {
         process->resume();
         auto reason = process->wait_on_signal();
         print_stop_reason(*process, reason);
     } else if (command == "register" || command == "reg") {
         handle_register_command(*process, args);
-    } else {
+    } else if (command == "stepi" || command == "si") {
+        auto reason = process->step_instruction();
+        print_stop_reason(*process, reason);
+    }
+
+    else {
         std::cerr << "Unknown command: " << command << std::endl;
     }
 }

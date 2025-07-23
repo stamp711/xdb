@@ -1,4 +1,4 @@
 int main() {
-    volatile int i;
-    while (true) i = 42;
+    volatile int i = 0;
+    while (true) i += 1;
 }
