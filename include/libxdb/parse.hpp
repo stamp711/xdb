@@ -1,8 +1,10 @@
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <libxdb/error.hpp>
 #include <optional>
 #include <string_view>
+#include <vector>
 
 namespace xdb {
 
@@ -67,6 +69,51 @@ auto parse_vector(std::string_view sv) {
     bytes[N - 1] = *b;
     c += 4;
     if (*c++ != ']') err();
+
+    return bytes;
+}
+
+// Dynamic version for variable-length byte arrays
+inline std::vector<std::byte> parse_vector(std::string_view sv) {
+    auto err = [] { error::send("Invalid vector value format"); };
+    std::vector<std::byte> bytes;
+
+    if (sv.size() < 2 || sv[0] != '[' || sv.back() != ']') {
+        err();
+    }
+
+    std::string_view content = sv.substr(1, sv.size() - 2);
+    if (content.empty()) {
+        return bytes;  // Empty array is valid
+    }
+
+    const char* c = content.data();
+    const char* end = content.data() + content.size();
+
+    while (c < end) {
+        // Skip whitespace
+        while (c < end && (*c == ' ' || *c == '\t')) ++c;
+        if (c >= end) break;
+
+        // Parse hex byte
+        if (c + 4 > end || c[0] != '0' || c[1] != 'x') {
+            err();
+        }
+
+        auto b = to_integral<std::byte>({c, 4}, 16);
+        if (!b) err();
+        bytes.push_back(*b);
+        c += 4;
+
+        // Skip whitespace
+        while (c < end && (*c == ' ' || *c == '\t')) ++c;
+
+        // Check for comma or end
+        if (c < end) {
+            if (*c != ',') err();
+            ++c;
+        }
+    }
 
     return bytes;
 }

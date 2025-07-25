@@ -92,6 +92,7 @@ void print_help(const std::vector<std::string> &args) {
                   << "    help, h          - Show this help message\n"
                   << "    breakpoint, b    - Manage breakpoints\n"
                   << "    continue, c      - Resume the process\n"
+                  << "    memory, mem      - Memory operations\n"
                   << "    register, reg    - Register operations\n"
                   << "    stepi, si        - Single step an instruction\n";
     } else if (args[1] == "breakpoint") {
@@ -106,6 +107,17 @@ void print_help(const std::vector<std::string> &args) {
             << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
     } else if (args[1] == "continue") {
         std::cout << "Resume the process.\n";
+    } else if (args[1] == "memory") {
+        std::cout
+            << "Memory operations.\n"
+            << "Usage:\n"
+            << "    memory read <address> [size]     - Read memory at address "
+               "(default size: 32 bytes)\n"
+            << "    memory write <address> <data>    - Write data to memory\n"
+            << "Examples:\n"
+            << "    memory read 0x555555555156\n"
+            << "    memory read 0x555555555156 16\n"
+            << "    memory write 0x555555555156 [0xff,0xaa,0x11]\n";
     } else if (args[1] == "register") {
         std::cout << "Usage:\n"
                   << "    register read\n"
@@ -271,6 +283,101 @@ void handle_breakpoint_command(xdb::process &process,
     }
 }
 
+void handle_memory_read(xdb::process &process,
+                        const std::vector<std::string> &args) {
+    if (args.size() < 3) {
+        print_help({"help", "memory"});
+        return;
+    }
+
+    auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+    if (!address) {
+        std::cerr << "Invalid address format. Use 0x prefix for hex addresses."
+                  << std::endl;
+        return;
+    }
+
+    std::size_t size = 32;  // Default size
+    if (args.size() >= 4) {
+        auto size_opt = xdb::to_integral<std::size_t>(args[3]);
+        if (!size_opt) {
+            std::cerr << "Invalid size value." << std::endl;
+            return;
+        }
+        size = *size_opt;
+    }
+
+    try {
+        auto data = process.read_memory(xdb::virt_addr{*address}, size);
+
+        // Print in hex dump format (16 bytes per line, no ASCII)
+        for (std::size_t i = 0; i < data.size(); i += 16) {
+            fmt::print("{:#016x}: ", *address + i);
+
+            // Print hex bytes (max 16 per line)
+            for (std::size_t j = 0; j < 16 && i + j < data.size(); ++j) {
+                fmt::print("{:02x} ", static_cast<std::uint8_t>(data[i + j]));
+            }
+
+            fmt::println("");
+        }
+    } catch (const xdb::error &e) {
+        std::cerr << "Error reading memory: " << e.what() << std::endl;
+    }
+}
+
+void handle_memory_write(xdb::process &process,
+                         const std::vector<std::string> &args) {
+    if (args.size() < 4) {
+        print_help({"help", "memory"});
+        return;
+    }
+
+    auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+    if (!address) {
+        std::cerr << "Invalid address format. Use 0x prefix for hex addresses."
+                  << std::endl;
+        return;
+    }
+
+    try {
+        auto bytes = xdb::parse_vector(args[3]);
+        if (bytes.empty()) {
+            std::cerr << "No data to write." << std::endl;
+            return;
+        }
+
+        process.write_memory(xdb::virt_addr{*address},
+                             std::span<const std::byte>(bytes));
+        fmt::println("Successfully wrote {} bytes to {:#x}", bytes.size(),
+                     *address);
+
+        // Show what was written
+        fmt::print("Data written: [");
+        for (std::size_t i = 0; i < bytes.size(); ++i) {
+            if (i > 0) fmt::print(",");
+            fmt::print("{:#04x}", static_cast<std::uint8_t>(bytes[i]));
+        }
+        fmt::println("]");
+
+    } catch (const xdb::error &e) {
+        std::cerr << "Error writing memory: " << e.what() << std::endl;
+    }
+}
+
+void handle_memory_command(xdb::process &process,
+                           const std::vector<std::string> &args) {
+    if (args.size() < 2) {
+        print_help({"help", "memory"});
+    } else if (args[1] == "read") {
+        handle_memory_read(process, args);
+    } else if (args[1] == "write") {
+        handle_memory_write(process, args);
+    } else {
+        print_help({"help", "memory"});
+    }
+}
+
 void handle_command(std::unique_ptr<xdb::process> &process,
                     std::string_view line) {
     auto args = split(line, ' ');
@@ -284,6 +391,8 @@ void handle_command(std::unique_ptr<xdb::process> &process,
         process->resume();
         auto reason = process->wait_on_signal();
         print_stop_reason(*process, reason);
+    } else if (command == "memory" || command == "mem") {
+        handle_memory_command(*process, args);
     } else if (command == "register" || command == "reg") {
         handle_register_command(*process, args);
     } else if (command == "stepi" || command == "si") {
