@@ -1,9 +1,12 @@
 #include <fcntl.h>
 #include <sys/personality.h>
 #include <sys/ptrace.h>
+#include <sys/uio.h>
 #include <sys/wait.h>
 
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
@@ -11,6 +14,8 @@
 #include <libxdb/register_info.hpp>
 #include <memory>
 #include <string>
+
+#include "libxdb/types.hpp"
 
 std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     // Attaching to a process by PID
@@ -246,6 +251,72 @@ void xdb::process::write_gprs(const user_regs_struct &gprs) {
 void xdb::process::write_fprs(const user_fpregs_struct &fprs) {
     if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
         error::send_errno("PTRACE_SETFPREGS failed");
+    }
+}
+
+std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
+                                                 std::size_t size) const {
+    // Prepare data buffer and local iovec
+    std::vector<std::byte> data(size);
+    ::iovec local_iov = {.iov_base = data.data(), .iov_len = data.size()};
+
+    // Allocate remote iovecs for each page
+    std::vector<::iovec> remote_iovs;
+    while (size > 0) {
+        auto size_to_next_page_boundary = 0x1000 - (addr.addr() & 0xfff);
+        auto iov_len = std::min(size, size_to_next_page_boundary);
+        remote_iovs.emplace_back(
+            ::iovec{.iov_base = reinterpret_cast<void *>(addr.addr()),
+                    .iov_len = iov_len});
+
+        addr += iov_len;
+        size -= iov_len;
+    }
+
+    if (::process_vm_readv(pid_, &local_iov, 1, remote_iovs.data(),
+                           remote_iovs.size(), 0) == -1) {
+        error::send_errno("process_vm_readv failed");
+    }
+
+    return data;
+}
+
+void xdb::process::write_memory(virt_addr addr,
+                                std::span<const std::byte> data) {
+    // We use PTRACE_POKEDATA here because it can write to PROT_READ or
+    // PROT_EXEC (i.e. not writable) memory. However, it can only write exactly
+    // 8 bytes at a time.
+    while (!data.empty()) {
+        // Write one word at a time
+        auto word_start = addr.align_to_word();
+        auto offset = addr - word_start;  // Offset of addr within the word
+        auto word_end = word_start + 8;
+
+        auto end_addr = std::min(word_end, addr + data.size());
+        auto size = end_addr - addr;  // size of the data to write in the word
+
+        uint64_t word = 0;
+
+        if (word_start < addr || end_addr < word_end) {
+            // Read the original word
+            errno = 0;
+            word = static_cast<uint64_t>(
+                ::ptrace(PTRACE_PEEKDATA, pid_, word_start.addr(), nullptr));
+            if (errno != 0) {
+                error::send_errno("ptrace PEEKDATA failed");
+            }
+        }
+
+        // Copy the data into the word to write
+        std::memcpy(reinterpret_cast<char *>(&word) + offset, data.data(),
+                    size);
+
+        if (::ptrace(PTRACE_POKEDATA, pid_, word_start.addr(), word) == -1) {
+            error::send_errno("ptrace POKEDATA failed");
+        }
+
+        addr = end_addr;
+        data = data.subspan(size);
     }
 }
 

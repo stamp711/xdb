@@ -17,12 +17,18 @@ class virt_addr {
 
     std::uint64_t addr() const { return addr_; }
 
+    virt_addr align_to_word() const { return virt_addr(addr_ & ~0x7ull); }
+
     virt_addr operator+(std::uint64_t offset) const {
         return virt_addr(addr_ + offset);
     }
 
     virt_addr operator-(std::uint64_t offset) const {
         return virt_addr(addr_ - offset);
+    }
+
+    std::uint64_t operator-(const virt_addr& other) const {
+        return addr_ - other.addr_;
     }
 
     virt_addr& operator+=(std::uint64_t offset) {

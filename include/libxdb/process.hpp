@@ -9,6 +9,9 @@
 #include <libxdb/stoppoint_collection.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
+#include <span>
+
+#include "libxdb/bit.hpp"
 
 namespace xdb {
 
@@ -54,6 +57,15 @@ class process {
     }
     void set_pc(virt_addr addr) {
         get_registers().write_by_id(register_id::rip, addr.addr());
+    }
+
+    // -- memory read/write --
+    std::vector<std::byte> read_memory(virt_addr addr, std::size_t size) const;
+    void write_memory(virt_addr addr, std::span<const std::byte> data);
+    template <typename T>
+    T read_memory_as(virt_addr address) const {
+        auto data = read_memory(address, sizeof(T));
+        return from_bytes<T>(data.data());
     }
 
     // -- breakpoint sites --
