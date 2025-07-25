@@ -394,3 +394,35 @@ TEST_CASE("Remove breakpoint site", "[breakpoint]") {
     REQUIRE(reason.state == xdb::process_state::exited);
     REQUIRE(reason.info == 0);
 }
+
+TEST_CASE("Reading and writing memory", "[memory]") {
+    xdb::pipe channel(false);
+    auto proc = xdb::process::launch(test_path() / "targets/memory", true,
+                                     channel.get_write());
+    channel.close_write();
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    // Read address of variable 'a' and verify its value
+    auto addr_data = channel.read();
+    auto a_address = *reinterpret_cast<const std::uint64_t*>(addr_data.data());
+    auto a_value =
+        proc->read_memory_as<std::uint64_t>(xdb::virt_addr(a_address));
+    REQUIRE(a_value == 0xcafecafe);
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    // Read address of buffer 'b' and write test data to it
+    addr_data = channel.read();
+    auto b_address = *reinterpret_cast<const std::uint64_t*>(addr_data.data());
+    proc->write_memory(xdb::virt_addr(b_address), {xdb::as_bytes("test"), 5});
+
+    proc->resume();
+    proc->wait_on_signal();
+
+    // Verify output matches what we wrote
+    auto output = channel.read();
+    REQUIRE(to_string_view(output) == "test");
+}
