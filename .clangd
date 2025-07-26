@@ -1,0 +1,16 @@
+Style:
+  AngledHeaders: ["libxdb/.*"]
+
+Diagnostics:
+  ClangTidy:
+    Add: [
+      modernize-*,
+      performance-*,
+      readability-*,
+      bugprone-*,
+      cppcoreguidelines-*,
+    ]
+    Remove: modernize-use-trailing-return-type
+
+Hover:
+  ShowAKA: Yes  # Show underlying type in hover tooltips

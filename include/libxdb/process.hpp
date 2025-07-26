@@ -14,7 +14,12 @@
 
 namespace xdb {
 
-enum class process_state { running, stopped, exited, terminated };
+enum class process_state : std::uint8_t {
+    running,
+    stopped,
+    exited,
+    terminated
+};
 
 struct stop_reason {
     stop_reason(int wait_status);
@@ -28,6 +33,8 @@ class process {
     process() = delete;
     process(const process &) = delete;
     process &operator=(const process &) = delete;
+    process(process &&) = delete;
+    process &operator=(process &&) = delete;
 
     ~process();
 
@@ -40,17 +47,17 @@ class process {
     // -- process control --
     void resume();
     stop_reason wait_on_signal();
-    pid_t pid() const { return pid_; }
-    process_state state() const { return state_; }
+    [[nodiscard]] pid_t pid() const { return pid_; }
+    [[nodiscard]] process_state state() const { return state_; }
     xdb::stop_reason step_instruction();
 
     // -- registers --
-    registers &get_registers() { return *registers_; }
-    const registers &get_registers() const { return *registers_; }
+    [[nodiscard]] registers &get_registers() { return *registers_; }
+    [[nodiscard]] const registers &get_registers() const { return *registers_; }
     void write_user_area(std::size_t offset, std::uint64_t data);
     void write_gprs(const user_regs_struct &gprs);
     void write_fprs(const user_fpregs_struct &fprs);
-    virt_addr get_pc() const {
+    [[nodiscard]] virt_addr get_pc() const {
         return virt_addr(
             get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
     }
@@ -59,20 +66,22 @@ class process {
     }
 
     // -- memory read/write --
-    std::vector<std::byte> read_memory(virt_addr addr, std::size_t size) const;
+    [[nodiscard]] std::vector<std::byte> read_memory(virt_addr addr,
+                                                     std::size_t size) const;
     void write_memory(virt_addr addr, std::span<const std::byte> data);
     template <typename T>
-    T read_memory_as(virt_addr address) const {
+    [[nodiscard]] T read_memory_as(virt_addr address) const {
         auto data = read_memory(address, sizeof(T));
         return from_bytes<T>(data.data());
     }
 
     // -- breakpoint sites --
     breakpoint_site &create_breakpoint_site(virt_addr addr);
-    stoppoint_collection<breakpoint_site> &breakpoint_sites() {
+    [[nodiscard]] stoppoint_collection<breakpoint_site> &breakpoint_sites() {
         return breakpoint_sites_;
     }
-    const stoppoint_collection<breakpoint_site> &breakpoint_sites() const {
+    [[nodiscard]] const stoppoint_collection<breakpoint_site> &
+    breakpoint_sites() const {
         return breakpoint_sites_;
     }
 
