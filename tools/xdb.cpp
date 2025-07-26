@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <initializer_list>
 #include <iostream>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/disassembler.hpp>
@@ -19,43 +20,43 @@
 #include <libxdb/registers.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
+#include <span>
 #include <string_view>
 #include <type_traits>
 #include <vector>
 
 namespace {
 
-std::unique_ptr<xdb::process> attach(int argc, const char *argv[]) {
-    if (argc < 2) {
-        std::cerr << "Usage: xdb [-p PID] [program_path]" << std::endl;
+std::unique_ptr<xdb::process> attach(std::span<const char *const> args) {
+    if (args.size() < 2) {
+        std::cerr << "Usage: xdb [-p PID] [program_path]\n";
         return nullptr;
     }
 
-    if (argc == 3 && argv[1] == std::string_view("-p")) {
+    if (args.size() == 3 && args[1] == std::string_view("-p")) {
         // Attaching to a process by PID
-        pid_t pid = static_cast<pid_t>(std::stoi(argv[2]));
+        pid_t pid = static_cast<pid_t>(std::stoi(args[2]));
         return xdb::process::attach(pid);
-    } else {
-        // Passing program path
-        std::filesystem::path path(argv[1]);
-        return xdb::process::launch(path);
     }
+
+    std::filesystem::path path(args[1]);
+    return xdb::process::launch(path);
 }
 
 std::vector<std::string> split(std::string_view str, char delimiter) {
     std::vector<std::string> tokens;
-    size_t i = 0;
-    while (i < str.size()) {
-        auto j = str.find(delimiter, i);
-        if (j == std::string_view::npos) {
-            j = str.size();  // If no more delimiters, take the rest of the
-                             // string
+    size_t start = 0;
+    while (start < str.size()) {
+        auto end = str.find(delimiter, start);
+        if (end == std::string_view::npos) {
+            end = str.size();  // If no more delimiters, take the rest of the
+                               // string
         }
-        if (j > i) {
+        if (end > start) {
             // Only add non-empty tokens
-            tokens.emplace_back(str.substr(i, j - i));
+            tokens.emplace_back(str.substr(start, end - start));
         }
-        i = j + 1;
+        start = end + 1;
     }
     return tokens;
 }
@@ -63,7 +64,7 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
 void print_stop_reason(const xdb::process &process,
                        const xdb::stop_reason &reason) {
     std::string message;
-    const char *sig;
+    const char *sig = nullptr;
     switch (reason.state) {
         case xdb::process_state::running:
             message = "is running";
@@ -99,11 +100,12 @@ void print_disassembly(xdb::process &process, xdb::virt_addr address,
 void handle_stop(xdb::process &process, xdb::stop_reason reason) {
     print_stop_reason(process, reason);
     if (reason.state == xdb::process_state::stopped) {
-        print_disassembly(process, process.get_pc(), 5);
+        constexpr std::size_t print_instruction_count = 5;
+        print_disassembly(process, process.get_pc(), print_instruction_count);
     }
 }
 
-void print_help(const std::vector<std::string> &args) {
+void print_help(std::span<const std::string> args) {
     if (args.size() == 1) {
         std::cout << "Available commands:\n"
                   << "    help, h            - Show this help message\n"
@@ -113,7 +115,7 @@ void print_help(const std::vector<std::string> &args) {
                   << "    memory, mem        - Memory operations\n"
                   << "    register, reg      - Register operations\n"
                   << "    stepi, si          - Single step an instruction\n";
-    } else if (args[1] == "breakpoint") {
+    } else if (args[1] == "breakpoint" || args[1] == "b") {
         std::cout
             << "Manage breakpoints.\n"
             << "Usage:\n"
@@ -123,9 +125,9 @@ void print_help(const std::vector<std::string> &args) {
             << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
             << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
             << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
-    } else if (args[1] == "continue") {
+    } else if (args[1] == "continue" || args[1] == "c") {
         std::cout << "Resume the process.\n";
-    } else if (args[1] == "disassemble") {
+    } else if (args[1] == "disassemble" || args[1] == "disas") {
         std::cout
             << "Disassemble instructions.\n"
             << "Usage:\n"
@@ -140,7 +142,7 @@ void print_help(const std::vector<std::string> &args) {
             << "    disas -c 10\n"
             << "    disas -a 0x401000\n"
             << "    disas -c 8 -a 0x401000\n";
-    } else if (args[1] == "memory") {
+    } else if (args[1] == "memory" || args[1] == "mem") {
         std::cout
             << "Memory operations.\n"
             << "Usage:\n"
@@ -151,28 +153,34 @@ void print_help(const std::vector<std::string> &args) {
             << "    memory read 0x555555555156\n"
             << "    memory read 0x555555555156 16\n"
             << "    memory write 0x555555555156 [0xff,0xaa,0x11]\n";
-    } else if (args[1] == "register") {
+    } else if (args[1] == "register" || args[1] == "reg") {
         std::cout << "Usage:\n"
                   << "    register read\n"
                   << "    register read <register>\n"
                   << "    register read all\n"
                   << "    register write <register> <value>\n";
-    } else if (args[1] == "stepi") {
+    } else if (args[1] == "stepi" || args[1] == "si") {
         std::cout << "Single step an instruction\n";
     } else {
-        std::cerr << "Unknown command: " << args[1] << std::endl;
+        std::cerr << "Unknown command: " << args[1] << '\n';
     }
 }
 
+// Helper function for print_help calls with initializer list
+void print_help_init(std::initializer_list<std::string> args_list) {
+    std::vector<std::string> args_vec(args_list);
+    print_help(std::span<const std::string>(args_vec));
+}
+
 void handle_register_read(xdb::process &process,
-                          const std::vector<std::string> &args) {
-    auto format = [](auto t) {
-        if constexpr (std::is_floating_point_v<decltype(t)>) {
-            return fmt::format("{}", t);
-        } else if constexpr (std::is_integral_v<decltype(t)>) {
-            return fmt::format("{:#0{}x}", t, sizeof(t) * 2 + 2);
+                          std::span<const std::string> args) {
+    auto format = [](auto value) {
+        if constexpr (std::is_floating_point_v<decltype(value)>) {
+            return fmt::format("{}", value);
+        } else if constexpr (std::is_integral_v<decltype(value)>) {
+            return fmt::format("{:#0{}x}", value, (sizeof(value) * 2) + 2);
         } else {  // byte64 & byte128 -> std::array<std::byte, _>
-            return fmt::format("[{:#04x}]", fmt::join(t, ", "));
+            return fmt::format("[{:#04x}]", fmt::join(value, ", "));
         }
     };
 
@@ -193,47 +201,55 @@ void handle_register_read(xdb::process &process,
             auto value = process.get_registers().read(info);
             fmt::println("{}:\t{}", info.name, std::visit(format, value));
         } catch (const xdb::error &e) {
-            std::cerr << "No such register" << std::endl;
+            std::cerr << "No such register\n";
         }
     } else {
-        print_help({"help", "register"});
+        print_help_init({"help", "register"});
     }
 }
 
 xdb::registers::value parse_register_value(const xdb::register_info &info,
-                                           const std::string &s) {
+                                           const std::string &value_str) {
     try {
         switch (info.format) {
             case xdb::register_format::uint:
                 switch (info.size) {
-                    case 1:
-                        return xdb::to_integral<std::uint8_t>(s).value();
-                    case 2:
-                        return xdb::to_integral<std::uint16_t>(s).value();
-                    case 4:
-                        return xdb::to_integral<std::uint32_t>(s).value();
-                    case 8:
-                        return xdb::to_integral<std::uint64_t>(s).value();
+                    case sizeof(std::uint8_t):
+                        return xdb::to_integral<std::uint8_t>(value_str)
+                            .value();
+                    case sizeof(std::uint16_t):
+                        return xdb::to_integral<std::uint16_t>(value_str)
+                            .value();
+                    case sizeof(std::uint32_t):
+                        return xdb::to_integral<std::uint32_t>(value_str)
+                            .value();
+                    case sizeof(std::uint64_t):
+                        return xdb::to_integral<std::uint64_t>(value_str)
+                            .value();
+                    default:
+                        break;
                 }
                 break;
             case xdb::register_format::double_float:
-                return xdb::to_float<double>(s).value();
+                return xdb::to_float<double>(value_str).value();
             case xdb::register_format::long_double:
-                return xdb::to_float<long double>(s).value();
+                return xdb::to_float<long double>(value_str).value();
             case xdb::register_format::vector:
-                if (info.size == 8) {
-                    return xdb::parse_vector<8>(s);
+                constexpr std::size_t vector_8_size = 8;
+                if (info.size == vector_8_size) {
+                    return xdb::parse_vector<vector_8_size>(value_str);
                 }
         }
     } catch (...) {
+        xdb::error::send("Invalid format");
     }
     xdb::error::send("Invalid format");
 }
 
 void handle_register_write(xdb::process &process,
-                           const std::vector<std::string> &args) {
+                           std::span<const std::string> args) {
     if (args.size() != 4) {
-        print_help({"help", "register"});
+        print_help_init({"help", "register"});
         return;
     }
     try {
@@ -241,26 +257,29 @@ void handle_register_write(xdb::process &process,
         auto value = parse_register_value(info, args[3]);
         process.get_registers().write(info, value);
     } catch (const xdb::error &e) {
-        std::cerr << "Error writing to register: " << e.what() << std::endl;
+        std::cerr << "Error writing to register: " << e.what() << '\n';
     }
 }
 
 void handle_register_command(xdb::process &process,
-                             const std::vector<std::string> &args) {
+                             std::span<const std::string> args) {
     if (args.size() < 2) {
-        print_help({"help", "register"});
-    } else if (args[1] == "read") {
+        print_help_init({"help", "register"});
+        return;
+    }
+
+    if (args[1] == "read") {
         handle_register_read(process, args);
     } else if (args[1] == "write") {
         handle_register_write(process, args);
     } else {
-        print_help({"help", "register"});
+        print_help_init({"help", "register"});
     }
 }
 
 void handle_breakpoint_command(xdb::process &process,
-                               const std::vector<std::string> args) {
-    auto phelp = []() { print_help({"help", "breakpoint"}); };
+                               std::span<const std::string> args) {
+    auto phelp = []() { print_help_init({"help", "breakpoint"}); };
 
     if (args.size() < 2) {
         phelp();
@@ -271,21 +290,24 @@ void handle_breakpoint_command(xdb::process &process,
     if (cmd == "list") {
         if (process.breakpoint_sites().empty()) {
             fmt::println("No breakpoints set.");
-        } else {
-            fmt::println("Breakpoints:");
-            process.breakpoint_sites().for_each([](const auto &bp) {
-                fmt::println("{}: address = {:#x}, {}", bp.id(),
-                             bp.address().addr(),
-                             bp.is_enabled() ? "enabled" : "disabled");
-            });
+            return;
         }
+        fmt::println("Breakpoints:");
+        process.breakpoint_sites().for_each([](const auto &breakpoint_site) {
+            fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(),
+                         breakpoint_site.address().addr(),
+                         breakpoint_site.is_enabled() ? "enabled" : "disabled");
+        });
         return;
-    } else if (cmd == "set") {
+    }
+
+    if (cmd == "set") {
         if (args.size() < 3) {
             phelp();
             return;
         }
-        auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+        constexpr int hex_base = 16;
+        auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
         if (!address) {
             fmt::println("Address is expected in 0xhex format");
             return;
@@ -298,18 +320,19 @@ void handle_breakpoint_command(xdb::process &process,
         phelp();
         return;
     }
-    auto id = xdb::to_integral<xdb::breakpoint_site::id_type>(args[2]);
-    if (!id) {
+    auto breakpoint_id =
+        xdb::to_integral<xdb::breakpoint_site::id_type>(args[2]);
+    if (!breakpoint_id) {
         fmt::println("Command expects valid breakpoint ID");
         return;
     }
 
     if (cmd == "enable") {
-        process.breakpoint_sites().get_by_id(*id).enable();
+        process.breakpoint_sites().get_by_id(*breakpoint_id).enable();
     } else if (cmd == "disable") {
-        process.breakpoint_sites().get_by_id(*id).disable();
+        process.breakpoint_sites().get_by_id(*breakpoint_id).disable();
     } else if (cmd == "delete") {
-        process.breakpoint_sites().remove_by_id(*id);
+        process.breakpoint_sites().remove_by_id(*breakpoint_id);
     } else {
         fmt::println("Unknown breakpoint command: {}", cmd);
         phelp();
@@ -317,24 +340,28 @@ void handle_breakpoint_command(xdb::process &process,
 }
 
 void handle_memory_read(xdb::process &process,
-                        const std::vector<std::string> &args) {
+                        std::span<const std::string> args) {
+    constexpr std::size_t default_read_bytes = 32;
+    constexpr std::size_t bytes_per_line = 16;
+
     if (args.size() < 3) {
-        print_help({"help", "memory"});
+        print_help_init({"help", "memory"});
         return;
     }
 
-    auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+    constexpr int hex_base = 16;
+    auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
     if (!address) {
-        std::cerr << "Invalid address format. Use 0x prefix for hex addresses."
-                  << std::endl;
+        std::cerr
+            << "Invalid address format. Use 0x prefix for hex addresses.\n";
         return;
     }
 
-    std::size_t size = 32;  // Default size
+    std::size_t size = default_read_bytes;  // Default size
     if (args.size() >= 4) {
         auto size_opt = xdb::to_integral<std::size_t>(args[3]);
         if (!size_opt) {
-            std::cerr << "Invalid size value." << std::endl;
+            std::cerr << "Invalid size value.\n";
             return;
         }
         size = *size_opt;
@@ -344,39 +371,41 @@ void handle_memory_read(xdb::process &process,
         auto data = process.read_memory(xdb::virt_addr{*address}, size);
 
         // Print in hex dump format (16 bytes per line, no ASCII)
-        for (std::size_t i = 0; i < data.size(); i += 16) {
+        for (std::size_t i = 0; i < data.size(); i += bytes_per_line) {
             fmt::print("{:#016x}: ", *address + i);
 
             // Print hex bytes (max 16 per line)
-            for (std::size_t j = 0; j < 16 && i + j < data.size(); ++j) {
+            for (std::size_t j = 0; j < bytes_per_line && i + j < data.size();
+                 ++j) {
                 fmt::print("{:02x} ", static_cast<std::uint8_t>(data[i + j]));
             }
 
             fmt::println("");
         }
     } catch (const xdb::error &e) {
-        std::cerr << "Error reading memory: " << e.what() << std::endl;
+        std::cerr << "Error reading memory: " << e.what() << '\n';
     }
 }
 
 void handle_memory_write(xdb::process &process,
-                         const std::vector<std::string> &args) {
+                         std::span<const std::string> args) {
     if (args.size() < 4) {
-        print_help({"help", "memory"});
+        print_help_init({"help", "memory"});
         return;
     }
 
-    auto address = xdb::to_integral<std::uint64_t>(args[2], 16);
+    constexpr int hex_base = 16;
+    auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
     if (!address) {
-        std::cerr << "Invalid address format. Use 0x prefix for hex addresses."
-                  << std::endl;
+        std::cerr
+            << "Invalid address format. Use 0x prefix for hex addresses.\n";
         return;
     }
 
     try {
         auto bytes = xdb::parse_vector(args[3]);
         if (bytes.empty()) {
-            std::cerr << "No data to write." << std::endl;
+            std::cerr << "No data to write.\n";
             return;
         }
 
@@ -388,33 +417,39 @@ void handle_memory_write(xdb::process &process,
         // Show what was written
         fmt::print("Data written: [");
         for (std::size_t i = 0; i < bytes.size(); ++i) {
-            if (i > 0) fmt::print(",");
+            if (i > 0) {
+                fmt::print(",");
+            }
             fmt::print("{:#04x}", static_cast<std::uint8_t>(bytes[i]));
         }
         fmt::println("]");
 
     } catch (const xdb::error &e) {
-        std::cerr << "Error writing memory: " << e.what() << std::endl;
+        std::cerr << "Error writing memory: " << e.what() << '\n';
     }
 }
 
 void handle_memory_command(xdb::process &process,
-                           const std::vector<std::string> &args) {
+                           std::span<const std::string> args) {
     if (args.size() < 2) {
-        print_help({"help", "memory"});
-    } else if (args[1] == "read") {
+        print_help_init({"help", "memory"});
+        return;
+    }
+
+    if (args[1] == "read") {
         handle_memory_read(process, args);
     } else if (args[1] == "write") {
         handle_memory_write(process, args);
     } else {
-        print_help({"help", "memory"});
+        print_help_init({"help", "memory"});
     }
 }
 
 void handle_disassemble_command(xdb::process &process,
-                                const std::vector<std::string> &args) {
+                                std::span<const std::string> args) {
     auto address = process.get_pc();
-    std::size_t n_instructions = 5;
+    constexpr std::size_t default_instruction_count = 5;
+    std::size_t n_instructions = default_instruction_count;
 
     // Parse command line arguments for -c and -a flags
     for (std::size_t i = 1; i < args.size(); ++i) {
@@ -427,7 +462,8 @@ void handle_disassemble_command(xdb::process &process,
             n_instructions = *count;
             ++i;  // Skip the argument we just consumed
         } else if (args[i] == "-a" && i + 1 < args.size()) {
-            auto addr = xdb::to_integral<std::uint64_t>(args[i + 1], 16);
+            constexpr int hex_base = 16;
+            auto addr = xdb::to_integral<std::uint64_t>(args[i + 1], hex_base);
             if (!addr) {
                 fmt::println(
                     "Invalid address format. Address is expected in "
@@ -467,36 +503,36 @@ void handle_command(std::unique_ptr<xdb::process> &process,
     }
 
     else {
-        std::cerr << "Unknown command: " << command << std::endl;
+        std::cerr << "Unknown command: " << command << '\n';
     }
 }
 
 }  // namespace
 
-int run(int argc, const char *argv[]) {
-    if (argc < 2) {
-        std::cerr << "No arguments given" << std::endl;
+int run(std::span<const char *const> args) {
+    if (args.size() < 2) {
+        std::cerr << "No arguments given\n";
         return -1;
     }
 
-    auto process = attach(argc, argv);
-    std::cout << "Attached to process with PID: " << process->pid()
-              << std::endl;
+    auto process = attach(args);
+    std::cout << "Attached to process with PID: " << process->pid() << '\n';
 
     // REPL
-    char *line = nullptr;
-    while ((line = readline("xdb> ")) != nullptr) {
+    std::unique_ptr<char, decltype(&free)> line_ptr{nullptr, &free};
+    using_history();
+    while (auto *line = readline("xdb> ")) {
+        line_ptr.reset(line);
         std::string line_string;
-        if (line == std::string_view("")) {
-            free(line);
+        if (std::string_view(line) == "") {
             // empty input is a shortcut for the last command
             if (history_length > 0) {
-                line_string = history_list()[history_length - 1]->line;
+                line_string =
+                    history_get(history_length)->line;  // 1-based index
             }
         } else {
             line_string = line;
             add_history(line);
-            free(line);
         }
 
         if (!line_string.empty()) {
@@ -509,12 +545,13 @@ int run(int argc, const char *argv[]) {
 
 int main(int argc, const char *argv[]) {
     try {
-        return run(argc, argv);
+        std::span<const char *const> args(argv, static_cast<std::size_t>(argc));
+        return run(args);
     } catch (const std::exception &e) {
-        std::cerr << "Error: " << e.what() << std::endl;
+        std::cerr << "Error: " << e.what() << '\n';
         return -1;
     } catch (...) {
-        std::cerr << "Unknown error occurred" << std::endl;
+        std::cerr << "Unknown error occurred\n";
         return -1;
     }
 }
