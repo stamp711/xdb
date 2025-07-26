@@ -12,10 +12,9 @@
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
+#include <libxdb/types.hpp>
 #include <memory>
 #include <string>
-
-#include "libxdb/types.hpp"
 
 std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     // Attaching to a process by PID

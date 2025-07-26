@@ -3,6 +3,7 @@
 #include <sys/types.h>
 
 #include <filesystem>
+#include <libxdb/bit.hpp>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/register_info.hpp>
 #include <libxdb/registers.hpp>
@@ -10,8 +11,6 @@
 #include <libxdb/types.hpp>
 #include <memory>
 #include <span>
-
-#include "libxdb/bit.hpp"
 
 namespace xdb {
 

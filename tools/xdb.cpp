@@ -11,17 +11,17 @@
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <libxdb/breakpoint_site.hpp>
+#include <libxdb/disassembler.hpp>
 #include <libxdb/parse.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
 #include <libxdb/registers.hpp>
+#include <libxdb/types.hpp>
 #include <memory>
 #include <string_view>
 #include <type_traits>
 #include <vector>
-
-#include "libxdb/breakpoint_site.hpp"
-#include "libxdb/types.hpp"
 
 namespace {
 
@@ -86,15 +86,33 @@ void print_stop_reason(const xdb::process &process,
     fmt::println("Process {} {}", process.pid(), message);
 }
 
+void print_disassembly(xdb::process &process, xdb::virt_addr address,
+                       std::size_t n_instructions) {
+    xdb::disassembler dis(process);
+    auto instructions = dis.disassemble(n_instructions, address);
+    for (const auto &instruction : instructions) {
+        fmt::println("{:08x}: {}", instruction.address.addr(),
+                     instruction.text);
+    }
+}
+
+void handle_stop(xdb::process &process, xdb::stop_reason reason) {
+    print_stop_reason(process, reason);
+    if (reason.state == xdb::process_state::stopped) {
+        print_disassembly(process, process.get_pc(), 5);
+    }
+}
+
 void print_help(const std::vector<std::string> &args) {
     if (args.size() == 1) {
         std::cout << "Available commands:\n"
-                  << "    help, h          - Show this help message\n"
-                  << "    breakpoint, b    - Manage breakpoints\n"
-                  << "    continue, c      - Resume the process\n"
-                  << "    memory, mem      - Memory operations\n"
-                  << "    register, reg    - Register operations\n"
-                  << "    stepi, si        - Single step an instruction\n";
+                  << "    help, h            - Show this help message\n"
+                  << "    breakpoint, b      - Manage breakpoints\n"
+                  << "    continue, c        - Resume the process\n"
+                  << "    disassemble, disas - Disassemble instructions\n"
+                  << "    memory, mem        - Memory operations\n"
+                  << "    register, reg      - Register operations\n"
+                  << "    stepi, si          - Single step an instruction\n";
     } else if (args[1] == "breakpoint") {
         std::cout
             << "Manage breakpoints.\n"
@@ -107,6 +125,21 @@ void print_help(const std::vector<std::string> &args) {
             << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
     } else if (args[1] == "continue") {
         std::cout << "Resume the process.\n";
+    } else if (args[1] == "disassemble") {
+        std::cout
+            << "Disassemble instructions.\n"
+            << "Usage:\n"
+            << "    disassemble [-c <count>] [-a <address>]\n"
+            << "    disas [-c <count>] [-a <address>]\n"
+            << "Options:\n"
+            << "    -c <count>     - Number of instructions to disassemble "
+               "(default: 5)\n"
+            << "    -a <address>   - Starting address (default: current PC)\n"
+            << "Examples:\n"
+            << "    disas\n"
+            << "    disas -c 10\n"
+            << "    disas -a 0x401000\n"
+            << "    disas -c 8 -a 0x401000\n";
     } else if (args[1] == "memory") {
         std::cout
             << "Memory operations.\n"
@@ -378,10 +411,41 @@ void handle_memory_command(xdb::process &process,
     }
 }
 
+void handle_disassemble_command(xdb::process &process,
+                                const std::vector<std::string> &args) {
+    auto address = process.get_pc();
+    std::size_t n_instructions = 5;
+
+    // Parse command line arguments for -c and -a flags
+    for (std::size_t i = 1; i < args.size(); ++i) {
+        if (args[i] == "-c" && i + 1 < args.size()) {
+            auto count = xdb::to_integral<std::size_t>(args[i + 1]);
+            if (!count) {
+                fmt::println("Invalid instruction count format.");
+                return;
+            }
+            n_instructions = *count;
+            ++i;  // Skip the argument we just consumed
+        } else if (args[i] == "-a" && i + 1 < args.size()) {
+            auto addr = xdb::to_integral<std::uint64_t>(args[i + 1], 16);
+            if (!addr) {
+                fmt::println(
+                    "Invalid address format. Address is expected in "
+                    "0xhex format.");
+                return;
+            }
+            address = xdb::virt_addr{*addr};
+            ++i;  // Skip the argument we just consumed
+        }
+    }
+
+    print_disassembly(process, address, n_instructions);
+}
+
 void handle_command(std::unique_ptr<xdb::process> &process,
                     std::string_view line) {
     auto args = split(line, ' ');
-    auto command = args[0];
+    const auto &command = args[0];
 
     if (command == "help" || command == "h") {
         print_help(args);
@@ -390,14 +454,16 @@ void handle_command(std::unique_ptr<xdb::process> &process,
     } else if (command == "continue" || command == "c") {
         process->resume();
         auto reason = process->wait_on_signal();
-        print_stop_reason(*process, reason);
+        handle_stop(*process, reason);
+    } else if (command == "disassemble" || command == "disas") {
+        handle_disassemble_command(*process, args);
     } else if (command == "memory" || command == "mem") {
         handle_memory_command(*process, args);
     } else if (command == "register" || command == "reg") {
         handle_register_command(*process, args);
     } else if (command == "stepi" || command == "si") {
         auto reason = process->step_instruction();
-        print_stop_reason(*process, reason);
+        handle_stop(*process, reason);
     }
 
     else {

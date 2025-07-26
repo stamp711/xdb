@@ -11,11 +11,13 @@ set_target_properties(
 
 target_compile_features(libxdb PUBLIC cxx_std_20)
 
+target_link_libraries(libxdb PRIVATE Zydis::Zydis)
+
 target_include_directories(
     libxdb
     PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
     PUBLIC
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE::${CMAKE_INSTALL_INCLUDEDIR}>
         $<BUILD_INTERFACE:${CMAKE_SOURCE_DIR}/include>
 )
 
