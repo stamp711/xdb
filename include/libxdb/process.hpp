@@ -68,6 +68,8 @@ class process {
     // -- memory read/write --
     [[nodiscard]] std::vector<std::byte> read_memory(virt_addr addr,
                                                      std::size_t size) const;
+    [[nodiscard]] std::vector<std::byte> read_memory_without_traps(
+        virt_addr addr, std::size_t size) const;
     void write_memory(virt_addr addr, std::span<const std::byte> data);
     template <typename T>
     [[nodiscard]] T read_memory_as(virt_addr address) const {

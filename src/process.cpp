@@ -294,6 +294,19 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
     return data;
 }
 
+[[nodiscard]] std::vector<std::byte> xdb::process::read_memory_without_traps(
+    virt_addr addr, std::size_t size) const {
+    auto memory = read_memory(addr, size);
+    for (const auto &bp :
+         breakpoint_sites_.get_in_address_range(addr, addr + size)) {
+        if (bp->is_enabled()) {
+            auto offset = bp->address() - addr;
+            memory[offset] = bp->original_byte_;
+        }
+    }
+    return memory;
+}
+
 // NOLINTNEXTLINE(readability-make-member-function-const)
 void xdb::process::write_memory(virt_addr addr,
                                 std::span<const std::byte> data) {

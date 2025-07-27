@@ -57,6 +57,16 @@ class stoppoint_collection {
         return get_by_address_impl(*this, address);
     }
 
+    [[nodiscard]] std::vector<Stoppoint*> get_in_address_range(virt_addr start,
+                                                               virt_addr end) {
+        return get_in_address_range_impl(*this, start, end);
+    }
+
+    [[nodiscard]] std::vector<const Stoppoint*> get_in_address_range(
+        virt_addr start, virt_addr end) const {
+        return get_in_address_range_impl(*this, start, end);
+    }
+
     void remove_by_id(typename Stoppoint::id_type id) {
         auto it = find_by_id(id);
         if (it == stoppoints_.end()) {
@@ -119,6 +129,22 @@ class stoppoint_collection {
                         " not found");
         }
         return **it;
+    }
+
+    template <typename Self>
+    [[nodiscard]] static auto get_in_address_range_impl(Self& self,
+                                                        virt_addr start,
+                                                        virt_addr end) {
+        std::vector<
+            std::conditional_t<std::is_const_v<std::remove_reference_t<Self>>,
+                               const Stoppoint*, Stoppoint*>>
+            result;
+        for (auto& stoppoint : self.stoppoints_) {
+            if (stoppoint->in_range(start, end)) {
+                result.emplace_back(stoppoint.get());
+            }
+        }
+        return result;
     }
 
     template <typename Collection>

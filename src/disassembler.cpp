@@ -16,7 +16,7 @@ std::vector<xdb::disassembler::instruction> xdb::disassembler::disassemble(
     }
 
     const std::size_t MAX_LENGTH_OF_X86_64_INSTRUCTION = 15;
-    auto code = process_->read_memory(
+    auto code = process_->read_memory_without_traps(
         address.value(), n_instructions * MAX_LENGTH_OF_X86_64_INSTRUCTION);
     std::span<const std::byte> code_span(code.data(), code.size());
 
