@@ -78,7 +78,9 @@ class process {
     }
 
     // -- breakpoint sites --
-    breakpoint_site &create_breakpoint_site(virt_addr addr);
+    breakpoint_site &create_breakpoint_site(virt_addr addr,
+                                            bool hardware = false,
+                                            bool internal = false);
     [[nodiscard]] stoppoint_collection<breakpoint_site> &breakpoint_sites() {
         return breakpoint_sites_;
     }
@@ -86,6 +88,10 @@ class process {
     breakpoint_sites() const {
         return breakpoint_sites_;
     }
+
+    // -- hardware breakpoint --
+    int set_hardware_breakpoint(virt_addr addr);
+    void clear_hardware_breakpoint(int hw_breakpoint_index);
 
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
@@ -95,6 +101,9 @@ class process {
           registers_(new registers(this)) {}
 
     void read_all_registers();
+
+    int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
+                               std::size_t size);
 
     pid_t pid_ = 0;
     bool terminate_on_destruction_ = true;

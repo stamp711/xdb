@@ -122,6 +122,9 @@ void print_help(std::span<const std::string> args) {
             << "    breakpoint list             - List all breakpoints\n"
             << "    breakpoint set <address>    - Set a breakpoint at the "
                "specified address\n"
+            << "    breakpoint set <address> --hardware/-h"
+            << "                                - Set a hardware breakpoint at "
+               "the specified address\n"
             << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
             << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
             << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
@@ -277,6 +280,22 @@ void handle_register_command(xdb::process &process,
     }
 }
 
+void print_all_breakpoints(xdb::process &process) {
+    if (process.breakpoint_sites().empty()) {
+        fmt::println("No breakpoints set.");
+        return;
+    }
+    fmt::println("Breakpoints:");
+    process.breakpoint_sites().for_each([](const auto &breakpoint_site) {
+        if (breakpoint_site.is_internal()) {
+            return;  // Skip internal breakpoints
+        }
+        fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(),
+                     breakpoint_site.address().addr(),
+                     breakpoint_site.is_enabled() ? "enabled" : "disabled");
+    });
+}
+
 void handle_breakpoint_command(xdb::process &process,
                                std::span<const std::string> args) {
     auto phelp = []() { print_help_init({"help", "breakpoint"}); };
@@ -288,16 +307,7 @@ void handle_breakpoint_command(xdb::process &process,
 
     auto cmd = args[1];
     if (cmd == "list") {
-        if (process.breakpoint_sites().empty()) {
-            fmt::println("No breakpoints set.");
-            return;
-        }
-        fmt::println("Breakpoints:");
-        process.breakpoint_sites().for_each([](const auto &breakpoint_site) {
-            fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(),
-                         breakpoint_site.address().addr(),
-                         breakpoint_site.is_enabled() ? "enabled" : "disabled");
-        });
+        print_all_breakpoints(process);
         return;
     }
 
@@ -312,7 +322,16 @@ void handle_breakpoint_command(xdb::process &process,
             fmt::println("Address is expected in 0xhex format");
             return;
         }
-        process.create_breakpoint_site(xdb::virt_addr{*address}).enable();
+        bool hardware = false;
+        if (args.size() > 3) {
+            if (args[3] == "--hardware" || args[3] == "-h") {
+                hardware = true;
+            } else {
+                xdb::error::send("Invalid argument");
+            }
+        }
+        process.create_breakpoint_site(xdb::virt_addr{*address}, hardware)
+            .enable();
         return;
     }
 

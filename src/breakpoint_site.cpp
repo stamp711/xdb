@@ -23,24 +23,38 @@ std::byte replace_byte_in_process(xdb::process& proc, xdb::virt_addr address,
 
 }  // namespace
 
-xdb::breakpoint_site::breakpoint_site(process& proc, virt_addr address)
-    : id_(get_next_id()),
-      process_(&proc),
+xdb::breakpoint_site::breakpoint_site(process& proc, virt_addr address,
+                                      bool is_hardware, bool is_internal)
+    : process_(&proc),
       address_(address),
       is_enabled_(false),
-      original_byte_{} {}
+      original_byte_{},
+      is_hardware_(is_hardware),
+      is_internal_(is_internal) {
+    id_ = is_internal_ ? -1 : get_next_id();
+}
 
 void xdb::breakpoint_site::enable() {
-    const std::byte INT3{0xCC};
-    if (!is_enabled_) {
+    if (is_enabled_) return;
+
+    if (is_hardware_) {
+        hardware_register_index_ = process_->set_hardware_breakpoint(address_);
+    } else /* Software breakpoint */ {
+        const std::byte INT3{0xCC};
         original_byte_ = replace_byte_in_process(*process_, address_, INT3);
-        is_enabled_ = true;
     }
+
+    is_enabled_ = true;
 }
 
 void xdb::breakpoint_site::disable() {
-    if (is_enabled_) {
+    if (!is_enabled_) return;
+
+    if (is_hardware_) {
+        process_->clear_hardware_breakpoint(hardware_register_index_);
+    } else /* Software breakpoint */ {
         replace_byte_in_process(*process_, address_, original_byte_);
-        is_enabled_ = false;
     }
+
+    is_enabled_ = false;
 }

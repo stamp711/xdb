@@ -22,6 +22,12 @@ class breakpoint_site {
     void enable();
     void disable();
 
+    [[nodiscard]] bool is_hardware() const { return is_hardware_; }
+    [[nodiscard]] bool is_internal() const { return is_internal_; }
+    [[nodiscard]] int hardware_register_index() const {
+        return hardware_register_index_;
+    }
+
     [[nodiscard]] bool is_enabled() const { return is_enabled_; }
     [[nodiscard]] virt_addr address() const { return address_; }
 
@@ -34,13 +40,18 @@ class breakpoint_site {
 
    private:
     friend process;
-    breakpoint_site(process& proc, virt_addr address);
+    breakpoint_site(process& proc, virt_addr address, bool is_hardware = false,
+                    bool is_internal = false);
 
     id_type id_;
     process* process_;
     virt_addr address_;
     bool is_enabled_;
     std::byte original_byte_;  // The original byte at the breakpoint address
+
+    bool is_hardware_;
+    bool is_internal_;
+    int hardware_register_index_ = -1;
 };
 
 }  // namespace xdb

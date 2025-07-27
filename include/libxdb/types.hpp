@@ -58,4 +58,10 @@ class virt_addr {
     return std::format("{:#x}", virt_addr.addr());
 }
 
+enum class stoppoint_mode : std::uint8_t {
+    execute,
+    write,
+    read_write,
+};
+
 }  // namespace xdb

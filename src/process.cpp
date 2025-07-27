@@ -17,7 +17,51 @@
 #include <string>
 
 namespace {
+
 constexpr std::size_t WORD_SIZE = 8;
+
+// Returns 0/1/2/3, or throw an exception if there's no free space
+int find_free_stoppoint_register(std::uint64_t control) {
+    for (int i = 0; i < 4; ++i) {
+        if ((control & (0b11ULL << (2 * i))) == 0) {
+            return i;
+        }
+    }
+    xdb::error::send("No free stoppoint register");
+}
+
+std::uint64_t encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) {
+    switch (mode) {
+        case xdb::stoppoint_mode::execute:
+            return 0b00;
+        case xdb::stoppoint_mode::write:
+            return 0b01;
+        case xdb::stoppoint_mode::read_write:
+            return 0b11;
+        default:
+            xdb::error::send("Invalid stoppoint mode");
+    }
+}
+
+std::uint64_t encode_hardware_stoppoint_size(std::size_t size) {
+    constexpr std::size_t BYTES_1 = 1;
+    constexpr std::size_t BYTES_2 = 2;
+    constexpr std::size_t BYTES_8 = 8;
+    constexpr std::size_t BYTES_4 = 4;
+    switch (size) {
+        case BYTES_1:
+            return 0b00;
+        case BYTES_2:
+            return 0b01;
+        case BYTES_8:
+            return 0b10;
+        case BYTES_4:
+            return 0b11;
+        default:
+            xdb::error::send("Invalid stoppoint size");
+    }
+}
+
 }  // namespace
 
 std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
@@ -299,10 +343,11 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
     auto memory = read_memory(addr, size);
     for (const auto &bp :
          breakpoint_sites_.get_in_address_range(addr, addr + size)) {
-        if (bp->is_enabled()) {
-            auto offset = bp->address() - addr;
-            memory[offset] = bp->original_byte_;
+        if (!bp->is_enabled() || bp->is_hardware()) {
+            continue;
         }
+        auto offset = bp->address() - addr;
+        memory[offset] = bp->original_byte_;
     }
     return memory;
 }
@@ -347,12 +392,67 @@ void xdb::process::write_memory(virt_addr addr,
     }
 }
 
-xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address) {
+xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address,
+                                                           bool hardware,
+                                                           bool internal) {
     if (breakpoint_sites_.contains_address(address)) {
         error::send("Breakpoint site already exists at address " +
                     std::to_string(address.addr()));
     }
-    auto bp_site =
-        std::unique_ptr<breakpoint_site>(new breakpoint_site(*this, address));
+    auto bp_site = std::unique_ptr<breakpoint_site>(
+        new breakpoint_site(*this, address, hardware, internal));
     return breakpoint_sites_.push(std::move(bp_site));
+}
+
+int xdb::process::set_hardware_breakpoint(virt_addr addr) {
+    constexpr auto size = 1;  // must be 1 for execute
+    return set_hardware_stoppoint(addr, stoppoint_mode::execute, size);
+}
+
+void xdb::process::clear_hardware_breakpoint(int hw_breakpoint_index) {
+    auto &regs = get_registers();
+    auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
+
+    // Clear the stoppoint
+    std::uint64_t clear_mask = (0b11ULL << (2 * hw_breakpoint_index));
+    control &= ~clear_mask;
+    regs.write_by_id(register_id::dr7, control);
+}
+
+int xdb::process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
+                                         std::size_t size) {
+    auto mode_flag = encode_hardware_stoppoint_mode(mode);
+    auto size_flag = encode_hardware_stoppoint_size(size);
+
+    auto &regs = get_registers();
+    auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
+
+    // Find a free slot for the stoppoint
+    int slot = find_free_stoppoint_register(control);
+    auto dr_id =
+        static_cast<register_id>(static_cast<int>(register_id::dr0) + slot);
+
+    // Calculate the control bits locations for the stoppoint
+    constexpr auto DR7_MODE_BITS_OFFSET = 16;
+    auto enable_bits_location = 2 * slot;
+    auto mode_bits_location = DR7_MODE_BITS_OFFSET + (4 * slot);
+    auto size_bits_location = mode_bits_location + 2;
+
+    // Calculate the control bits for the stoppoint
+    std::uint64_t mask = (0b11ULL << enable_bits_location) |
+                         (0b11ULL << mode_bits_location) |
+                         (0b11ULL << size_bits_location);
+    std::uint64_t flag = (0b01ULL << enable_bits_location) |
+                         (mode_flag << mode_bits_location) |
+                         (size_flag << size_bits_location);
+
+    // Set the control bits for the stoppoint
+    control &= ~mask;
+    control |= flag;
+
+    // Write the address and control bits to the registers
+    regs.write_by_id(dr_id, addr.addr());
+    regs.write_by_id(register_id::dr7, control);
+
+    return 0;
 }
