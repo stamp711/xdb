@@ -1,3 +1,3 @@
-#include <cstdio>
+#include <iostream>
 
-int main() { std::printf("hello"); }
+int main() { std::cout << "hello"; }

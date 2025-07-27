@@ -8,8 +8,8 @@
 
 namespace xdb {
 
-pipe::pipe(bool close_on_exec) {
-    if (::pipe2(fds_, close_on_exec ? O_CLOEXEC : 0) == -1) {
+pipe::pipe(bool close_on_exec) : fds_{-1, -1} {
+    if (::pipe2(fds_.data(), close_on_exec ? O_CLOEXEC : 0) == -1) {
         error::send_errno("Pipe creation failed");
     }
 }
@@ -37,12 +37,13 @@ std::vector<std::byte> pipe::read() {
     if (fds_[READ_END] == -1) {
         error::send("Read end of pipe is closed");
     }
-    std::byte buffer[1024];
-    ssize_t bytes_read = ::read(fds_[READ_END], buffer, sizeof(buffer));
+    constexpr size_t BUFFER_SIZE = 1024;
+    std::array<std::byte, BUFFER_SIZE> buffer{};
+    ssize_t bytes_read = ::read(fds_[READ_END], buffer.data(), buffer.size());
     if (bytes_read < 0) {
         error::send_errno("Read from pipe failed");
     }
-    return std::vector<std::byte>(buffer, buffer + bytes_read);
+    return {buffer.begin(), buffer.begin() + bytes_read};
 }
 
 void pipe::write(const std::byte* buf, size_t size) {

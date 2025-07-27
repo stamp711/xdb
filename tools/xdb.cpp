@@ -488,9 +488,14 @@ void handle_command(std::unique_ptr<xdb::process> &process,
     } else if (command == "breakpoint" || command == "b") {
         handle_breakpoint_command(*process, args);
     } else if (command == "continue" || command == "c") {
-        process->resume();
-        auto reason = process->wait_on_signal();
-        handle_stop(*process, reason);
+        if (process->state() == xdb::process_state::stopped) {
+            process->resume();
+            auto reason = process->wait_on_signal();
+            handle_stop(*process, reason);
+        } else {
+            std::cerr
+                << "Cannot continue because process state is not stopped\n";
+        }
     } else if (command == "disassemble" || command == "disas") {
         handle_disassemble_command(*process, args);
     } else if (command == "memory" || command == "mem") {

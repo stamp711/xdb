@@ -40,7 +40,7 @@ class process {
 
     // -- create by launching or attaching --
     static std::unique_ptr<process> launch(
-        std::filesystem::path path, bool debug = true,
+        const std::filesystem::path &path, bool debug = true,
         std::optional<int> stdout_replacement = std::nullopt);
     static std::unique_ptr<process> attach(pid_t pid);
 

@@ -40,12 +40,11 @@ byte64 to_byte64(const T& value) {
 }
 
 inline std::string_view to_string_view(const std::byte* bytes, size_t size) {
-    return std::string_view(reinterpret_cast<const char*>(bytes), size);
+    return {reinterpret_cast<const char*>(bytes), size};
 }
 
 inline std::string_view to_string_view(const std::vector<std::byte>& bytes) {
-    return std::string_view(reinterpret_cast<const char*>(bytes.data()),
-                            bytes.size());
+    return {reinterpret_cast<const char*>(bytes.data()), bytes.size()};
 }
 
 }  // namespace xdb

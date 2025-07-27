@@ -7,27 +7,33 @@
 
 namespace xdb {
 
-using byte64 = std::array<std::byte, 8>;
-using byte128 = std::array<std::byte, 16>;
+constexpr std::size_t BYTE64_SIZE = 8;
+constexpr std::size_t BYTE128_SIZE = 16;
+
+using byte64 = std::array<std::byte, BYTE64_SIZE>;
+using byte128 = std::array<std::byte, BYTE128_SIZE>;
 
 class virt_addr {
    public:
     virt_addr() = default;
     explicit virt_addr(std::uint64_t addr) : addr_(addr) {}
 
-    std::uint64_t addr() const { return addr_; }
+    [[nodiscard]] std::uint64_t addr() const { return addr_; }
 
-    virt_addr align_to_word() const { return virt_addr(addr_ & ~0x7ull); }
+    [[nodiscard]] virt_addr align_to_word() const {
+        constexpr std::uint64_t WORD_ALIGNMENT_MASK = 0x7ULL;
+        return virt_addr(addr_ & ~WORD_ALIGNMENT_MASK);
+    }
 
-    virt_addr operator+(std::uint64_t offset) const {
+    [[nodiscard]] virt_addr operator+(std::uint64_t offset) const {
         return virt_addr(addr_ + offset);
     }
 
-    virt_addr operator-(std::uint64_t offset) const {
+    [[nodiscard]] virt_addr operator-(std::uint64_t offset) const {
         return virt_addr(addr_ - offset);
     }
 
-    std::uint64_t operator-(const virt_addr& other) const {
+    [[nodiscard]] std::uint64_t operator-(const virt_addr& other) const {
         return addr_ - other.addr_;
     }
 
@@ -41,15 +47,15 @@ class virt_addr {
         return *this;
     }
 
-    bool operator==(const virt_addr& other) const = default;
-    auto operator<=>(const virt_addr& other) const = default;
+    [[nodiscard]] bool operator==(const virt_addr& other) const = default;
+    [[nodiscard]] auto operator<=>(const virt_addr& other) const = default;
 
    private:
     std::uint64_t addr_ = 0;
 };
 
-inline std::string to_string(const xdb::virt_addr& va) {
-    return std::format("{:#x}", va.addr());
+[[nodiscard]] inline std::string to_string(const xdb::virt_addr& virt_addr) {
+    return std::format("{:#x}", virt_addr.addr());
 }
 
 }  // namespace xdb

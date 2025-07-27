@@ -10,7 +10,15 @@ Diagnostics:
       bugprone-*,
       cppcoreguidelines-*,
     ]
-    Remove: modernize-use-trailing-return-type
+    Remove: [
+      cppcoreguidelines-pro-bounds-pointer-arithmetic,
+      cppcoreguidelines-pro-type-reinterpret-cast,
+      cppcoreguidelines-pro-type-vararg,
+      modernize-use-trailing-return-type,
+      readability-identifier-length
+    ]
+    CheckOptions:
+      readability-braces-around-statements.ShortStatementLines: 1
 
 Hover:
   ShowAKA: Yes  # Show underlying type in hover tooltips

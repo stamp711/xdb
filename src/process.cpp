@@ -16,6 +16,10 @@
 #include <memory>
 #include <string>
 
+namespace {
+constexpr std::size_t WORD_SIZE = 8;
+}  // namespace
+
 std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     // Attaching to a process by PID
     if (pid <= 0) {
@@ -41,7 +45,7 @@ void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
 }
 
 std::unique_ptr<xdb::process> xdb::process::launch(
-    std::filesystem::path path, bool debug,
+    const std::filesystem::path &path, bool debug,
     std::optional<int> stdout_replacement) {
     pipe p(true);  // Create a pipe with close-on-exec
 
@@ -135,7 +139,7 @@ void xdb::process::resume() {
 }
 
 xdb::stop_reason xdb::process::wait_on_signal() {
-    int wait_status;
+    int wait_status = 0;
     if (waitpid(pid_, &wait_status, 0) < 0) {
         error::send_errno("waitpid failed");
     }
@@ -170,7 +174,6 @@ xdb::stop_reason xdb::process::step_instruction() {
         auto &bp = breakpoint_sites_.get_by_address(pc);
         bp.disable();
         bp_to_reenable = &bp;
-        ::printf("disabled");
     }
 
     if (::ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr) == -1) {
@@ -181,7 +184,6 @@ xdb::stop_reason xdb::process::step_instruction() {
     // Re-enable the breakpoint
     if (bp_to_reenable) {
         (*bp_to_reenable)->enable();
-        ::printf("enabled");
     }
 
     return reason;
@@ -220,33 +222,43 @@ void xdb::process::read_all_registers() {
     }
 
     // Read debug registers
-    for (int i = 0; i < 8; ++i) {
-        auto id = static_cast<int>(register_id::dr0) + i;
+    // Template helper to read a single debug register at compile-time index
+    auto read_debug_register = [this]<int I>() {
+        auto id = static_cast<int>(register_id::dr0) + I;
         auto offset = register_info_by_id(static_cast<register_id>(id)).offset;
 
         errno = 0;  // Reset errno before each ptrace call
-        std::uint64_t data = static_cast<std::uint64_t>(
+        auto data = static_cast<std::uint64_t>(
             ptrace(PTRACE_PEEKUSER, pid_, offset, nullptr));
         if (errno != 0) {
             error::send_errno("PTRACE_PEEKUSER failed for debug register");
         }
 
-        get_registers().data_.u_debugreg[i] = data;
-    }
+        get_registers().data_.u_debugreg[I] = data;
+    };
+
+    // Read all debug registers using fold expression
+    constexpr int DEBUG_REGISTER_COUNT = 8;
+    [&]<int... Is>(std::integer_sequence<int, Is...>) {
+        (read_debug_register.template operator()<Is>(), ...);
+    }(std::make_integer_sequence<int, DEBUG_REGISTER_COUNT>{});
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 void xdb::process::write_user_area(std::size_t offset, std::uint64_t data) {
     if (ptrace(PTRACE_POKEUSER, pid_, offset, data) == -1) {
         error::send_errno("PTRACE_POKEUSER failed");
     }
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 void xdb::process::write_gprs(const user_regs_struct &gprs) {
     if (ptrace(PTRACE_SETREGS, pid_, nullptr, &gprs) == -1) {
         error::send_errno("PTRACE_SETREGS failed");
     }
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 void xdb::process::write_fprs(const user_fpregs_struct &fprs) {
     if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
         error::send_errno("PTRACE_SETFPREGS failed");
@@ -262,11 +274,13 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
     // Allocate remote iovecs for each page
     std::vector<::iovec> remote_iovs;
     while (size > 0) {
-        auto size_to_next_page_boundary = 0x1000 - (addr.addr() & 0xfff);
+        auto size_to_next_page_boundary = PAGE_SIZE - (addr.addr() & PAGE_MASK);
         auto iov_len = std::min(size, size_to_next_page_boundary);
-        remote_iovs.emplace_back(
-            ::iovec{.iov_base = reinterpret_cast<void *>(addr.addr()),
-                    .iov_len = iov_len});
+        remote_iovs.emplace_back(::iovec{
+            .iov_base =
+                /* NOLINT(performance-no-int-to-ptr) */ reinterpret_cast<
+                    void *>(addr.addr()),
+            .iov_len = iov_len});
 
         addr += iov_len;
         size -= iov_len;
@@ -280,6 +294,7 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
     return data;
 }
 
+// NOLINTNEXTLINE(readability-make-member-function-const)
 void xdb::process::write_memory(virt_addr addr,
                                 std::span<const std::byte> data) {
     // We use PTRACE_POKEDATA here because it can write to PROT_READ or
@@ -289,7 +304,7 @@ void xdb::process::write_memory(virt_addr addr,
         // Write one word at a time
         auto word_start = addr.align_to_word();
         auto offset = addr - word_start;  // Offset of addr within the word
-        auto word_end = word_start + 8;
+        auto word_end = word_start + WORD_SIZE;
 
         auto end_addr = std::min(word_end, addr + data.size());
         auto size = end_addr - addr;  // size of the data to write in the word

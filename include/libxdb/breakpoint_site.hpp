@@ -12,18 +12,23 @@ class breakpoint_site {
     breakpoint_site() = delete;
     breakpoint_site(const breakpoint_site&) = delete;
     breakpoint_site& operator=(const breakpoint_site&) = delete;
+    breakpoint_site(breakpoint_site&&) = delete;
+    breakpoint_site& operator=(breakpoint_site&&) = delete;
+    ~breakpoint_site() = default;
 
     using id_type = std::int32_t;
-    id_type id() const { return id_; }
+    [[nodiscard]] id_type id() const { return id_; }
 
     void enable();
     void disable();
 
-    bool is_enabled() const { return is_enabled_; }
-    virt_addr address() const { return address_; }
+    [[nodiscard]] bool is_enabled() const { return is_enabled_; }
+    [[nodiscard]] virt_addr address() const { return address_; }
 
-    bool at_address(virt_addr addr) const { return address_ == addr; }
-    bool in_range(virt_addr low, virt_addr high) const {
+    [[nodiscard]] bool at_address(virt_addr addr) const {
+        return address_ == addr;
+    }
+    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const {
         return address_ >= low && address_ < high;
     }
 
