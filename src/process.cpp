@@ -65,7 +65,9 @@ std::uint64_t encode_hardware_stoppoint_size(std::size_t size) {
 
 }  // namespace
 
-std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
+namespace xdb {
+
+std::unique_ptr<process> process::attach(pid_t pid) {
     // Attaching to a process by PID
     if (pid <= 0) {
         error::send("Invalid PID");
@@ -81,7 +83,7 @@ std::unique_ptr<xdb::process> xdb::process::attach(pid_t pid) {
     return proc;
 }
 
-void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
+void exit_with_perror(pipe &p, const std::string &prefix) {
     auto message = prefix + ": " + strerror(errno);
     p.write(reinterpret_cast<const std::byte *>(message.data()),
             message.size());
@@ -89,7 +91,7 @@ void exit_with_perror(xdb::pipe &p, const std::string &prefix) {
     ::exit(-1);
 }
 
-std::unique_ptr<xdb::process> xdb::process::launch(
+std::unique_ptr<process> process::launch(
     const std::filesystem::path &path, bool debug,
     std::optional<int> stdout_replacement) {
     pipe p(true);  // Create a pipe with close-on-exec
@@ -137,7 +139,7 @@ std::unique_ptr<xdb::process> xdb::process::launch(
     return proc;
 }
 
-xdb::process::~process() {
+process::~process() {
     if (pid_ <= 0) {
         return;
     }
@@ -160,7 +162,7 @@ xdb::process::~process() {
     }
 }
 
-void xdb::process::resume() {
+void process::resume() {
     // Single step the breakpoint if it was hit
     auto pc = get_pc();
     if (breakpoint_sites_.enabled_stoppoint_address(pc)) {
@@ -183,7 +185,7 @@ void xdb::process::resume() {
     state_ = process_state::running;
 }
 
-xdb::stop_reason xdb::process::wait_on_signal() {
+stop_reason process::wait_on_signal() {
     int wait_status = 0;
     if (waitpid(pid_, &wait_status, 0) < 0) {
         error::send_errno("waitpid failed");
@@ -210,7 +212,7 @@ xdb::stop_reason xdb::process::wait_on_signal() {
     return reason;
 }
 
-xdb::stop_reason xdb::process::step_instruction() {
+stop_reason process::step_instruction() {
     // If we are stopped at a breakpoint, restore it to the original instruction
     // before stepping
     auto pc = get_pc();
@@ -234,7 +236,7 @@ xdb::stop_reason xdb::process::step_instruction() {
     return reason;
 }
 
-xdb::stop_reason::stop_reason(int wait_status) {
+stop_reason::stop_reason(int wait_status) {
     if (WIFSTOPPED(wait_status)) {
         state = process_state::stopped;
         info = static_cast<uint8_t>(WSTOPSIG(wait_status));
@@ -253,7 +255,7 @@ xdb::stop_reason::stop_reason(int wait_status) {
     }
 }
 
-void xdb::process::read_all_registers() {
+void process::read_all_registers() {
     // Read general-purpose registers
     if (ptrace(PTRACE_GETREGS, pid_, nullptr, &get_registers().data_.regs) ==
         -1) {
@@ -290,28 +292,28 @@ void xdb::process::read_all_registers() {
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void xdb::process::write_user_area(std::size_t offset, std::uint64_t data) {
+void process::write_user_area(std::size_t offset, std::uint64_t data) {
     if (ptrace(PTRACE_POKEUSER, pid_, offset, data) == -1) {
         error::send_errno("PTRACE_POKEUSER failed");
     }
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void xdb::process::write_gprs(const user_regs_struct &gprs) {
+void process::write_gprs(const user_regs_struct &gprs) {
     if (ptrace(PTRACE_SETREGS, pid_, nullptr, &gprs) == -1) {
         error::send_errno("PTRACE_SETREGS failed");
     }
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void xdb::process::write_fprs(const user_fpregs_struct &fprs) {
+void process::write_fprs(const user_fpregs_struct &fprs) {
     if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
         error::send_errno("PTRACE_SETFPREGS failed");
     }
 }
 
-std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
-                                                 std::size_t size) const {
+std::vector<std::byte> process::read_memory(virt_addr addr,
+                                            std::size_t size) const {
     // Prepare data buffer and local iovec
     std::vector<std::byte> data(size);
     ::iovec local_iov = {.iov_base = data.data(), .iov_len = data.size()};
@@ -339,7 +341,7 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
     return data;
 }
 
-[[nodiscard]] std::vector<std::byte> xdb::process::read_memory_without_traps(
+[[nodiscard]] std::vector<std::byte> process::read_memory_without_traps(
     virt_addr addr, std::size_t size) const {
     auto memory = read_memory(addr, size);
     for (const auto &bp :
@@ -354,8 +356,7 @@ std::vector<std::byte> xdb::process::read_memory(virt_addr addr,
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void xdb::process::write_memory(virt_addr addr,
-                                std::span<const std::byte> data) {
+void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
     // We use PTRACE_POKEDATA here because it can write to PROT_READ or
     // PROT_EXEC (i.e. not writable) memory. However, it can only write exactly
     // 8 bytes at a time.
@@ -393,9 +394,8 @@ void xdb::process::write_memory(virt_addr addr,
     }
 }
 
-xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address,
-                                                           bool hardware,
-                                                           bool internal) {
+breakpoint_site &process::create_breakpoint_site(virt_addr address,
+                                                 bool hardware, bool internal) {
     if (breakpoint_sites_.contains_address(address)) {
         error::send("Breakpoint site already exists at address " +
                     std::to_string(address.addr()));
@@ -405,9 +405,8 @@ xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address,
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
-xdb::watchpoint &xdb::process::create_watchpoint(virt_addr addr,
-                                                 stoppoint_mode mode,
-                                                 std::size_t size) {
+watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode,
+                                       std::size_t size) {
     if (watchpoints_.contains_address(addr)) {
         error::send("Watchpoint already exists at address " +
                     std::to_string(addr.addr()));
@@ -417,8 +416,8 @@ xdb::watchpoint &xdb::process::create_watchpoint(virt_addr addr,
     return watchpoints_.push(std::move(wp));
 }
 
-int xdb::process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
-                                         std::size_t size) {
+int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
+                                    std::size_t size) {
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
 
@@ -455,7 +454,7 @@ int xdb::process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
     return 0;
 }
 
-void xdb::process::clear_hardware_stoppoint(int hw_stoppoint_index) {
+void process::clear_hardware_stoppoint(int hw_stoppoint_index) {
     auto &regs = get_registers();
     auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
 
@@ -464,3 +463,5 @@ void xdb::process::clear_hardware_stoppoint(int hw_stoppoint_index) {
     control &= ~clear_mask;
     regs.write_by_id(register_id::dr7, control);
 }
+
+}  // namespace xdb

@@ -5,7 +5,9 @@
 #include <cstddef>
 #include <libxdb/disassembler.hpp>
 
-std::vector<xdb::disassembler::instruction> xdb::disassembler::disassemble(
+namespace xdb {
+
+std::vector<disassembler::instruction> disassembler::disassemble(
     std::size_t n_instructions, std::optional<virt_addr> address) {
     std::vector<instruction> res;
     res.reserve(n_instructions);
@@ -33,3 +35,5 @@ std::vector<xdb::disassembler::instruction> xdb::disassembler::disassemble(
 
     return res;
 }
+
+}  // namespace xdb
