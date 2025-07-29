@@ -25,17 +25,11 @@ class virt_addr {
         return virt_addr(addr_ & ~WORD_ALIGNMENT_MASK);
     }
 
-    [[nodiscard]] virt_addr operator+(std::uint64_t offset) const {
-        return virt_addr(addr_ + offset);
-    }
+    [[nodiscard]] virt_addr operator+(std::uint64_t offset) const { return virt_addr(addr_ + offset); }
 
-    [[nodiscard]] virt_addr operator-(std::uint64_t offset) const {
-        return virt_addr(addr_ - offset);
-    }
+    [[nodiscard]] virt_addr operator-(std::uint64_t offset) const { return virt_addr(addr_ - offset); }
 
-    [[nodiscard]] std::uint64_t operator-(const virt_addr& other) const {
-        return addr_ - other.addr_;
-    }
+    [[nodiscard]] std::uint64_t operator-(const virt_addr& other) const { return addr_ - other.addr_; }
 
     virt_addr& operator+=(std::uint64_t offset) {
         addr_ += offset;

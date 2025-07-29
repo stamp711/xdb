@@ -31,8 +31,7 @@ xdb::registers::value xdb::registers::read(const register_info& info) const {
                 case sizeof(std::uint64_t):
                     return from_bytes<std::uint64_t>(byte_ptr);
                 default:
-                    error::send("Unexpected size for uint register format: " +
-                                std::to_string(info.size));
+                    error::send("Unexpected size for uint register format: " + std::to_string(info.size));
             }
 
         case register_format::double_float:
@@ -48,8 +47,7 @@ xdb::registers::value xdb::registers::read(const register_info& info) const {
                 case sizeof(byte128):
                     return from_bytes<byte128>(byte_ptr);
                 default:
-                    error::send("Unexpected size for vector register format: " +
-                                std::to_string(info.size));
+                    error::send("Unexpected size for vector register format: " + std::to_string(info.size));
             }
 
         default:
@@ -81,9 +79,7 @@ xdb::byte128 widen(const xdb::register_info& info, T t) {
                 case sizeof(std::uint64_t):
                     return xdb::to_byte128(static_cast<std::uint64_t>(t));
                 default:
-                    xdb::error::send(
-                        "Unexpected size for uint register format: " +
-                        std::to_string(info.size));
+                    xdb::error::send("Unexpected size for uint register format: " + std::to_string(info.size));
             }
         }
     }
@@ -101,13 +97,10 @@ void xdb::registers::write(const register_info& info, value val) {
             if (sizeof(v) <= info.size) {
                 auto wide = widen(info, v);
                 auto val_bytes = as_bytes(wide);
-                std::memcpy(&user_bytes_span.at(info.offset), val_bytes,
-                            info.size);
+                std::memcpy(&user_bytes_span.at(info.offset), val_bytes, info.size);
             } else {
-                error::send(
-                    "Unexpected size for value in write operation: val size " +
-                    std::to_string(sizeof(v)) + " vs register size " +
-                    std::to_string(info.size));
+                error::send("Unexpected size for value in write operation: val size " + std::to_string(sizeof(v)) +
+                            " vs register size " + std::to_string(info.size));
             }
         },
         val);
@@ -118,10 +111,7 @@ void xdb::registers::write(const register_info& info, value val) {
         // so we write all FPRs at once.
         proc_->write_fprs(data_.i387);
     } else {
-        auto aligned_offset =
-            info.offset & ~ALIGNMENT_MASK;  // Align to 8 bytes
-        proc_->write_user_area(
-            aligned_offset,
-            from_bytes<std::uint64_t>(&user_bytes_span.at(aligned_offset)));
+        auto aligned_offset = info.offset & ~ALIGNMENT_MASK;  // Align to 8 bytes
+        proc_->write_user_area(aligned_offset, from_bytes<std::uint64_t>(&user_bytes_span.at(aligned_offset)));
     }
 }

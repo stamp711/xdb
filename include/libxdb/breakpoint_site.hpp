@@ -24,24 +24,17 @@ class breakpoint_site {
 
     [[nodiscard]] bool is_hardware() const { return is_hardware_; }
     [[nodiscard]] bool is_internal() const { return is_internal_; }
-    [[nodiscard]] int hardware_register_index() const {
-        return hardware_register_index_;
-    }
+    [[nodiscard]] int hardware_register_index() const { return hardware_register_index_; }
 
     [[nodiscard]] bool is_enabled() const { return is_enabled_; }
     [[nodiscard]] virt_addr address() const { return address_; }
 
-    [[nodiscard]] bool at_address(virt_addr addr) const {
-        return address_ == addr;
-    }
-    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const {
-        return address_ >= low && address_ < high;
-    }
+    [[nodiscard]] bool at_address(virt_addr addr) const { return address_ == addr; }
+    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const { return address_ >= low && address_ < high; }
 
    private:
     friend process;
-    breakpoint_site(process& proc, virt_addr address, bool is_hardware = false,
-                    bool is_internal = false);
+    breakpoint_site(process& proc, virt_addr address, bool is_hardware = false, bool is_internal = false);
 
     id_type id_;
     process* process_;

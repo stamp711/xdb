@@ -27,17 +27,12 @@ class watchpoint {
     [[nodiscard]] stoppoint_mode mode() const { return mode_; }
     [[nodiscard]] std::size_t size() const { return size_; }
 
-    [[nodiscard]] bool at_address(virt_addr addr) const {
-        return address_ == addr;
-    }
-    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const {
-        return address_ >= low && address_ < high;
-    }
+    [[nodiscard]] bool at_address(virt_addr addr) const { return address_ == addr; }
+    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const { return address_ >= low && address_ < high; }
 
    private:
     friend process;
-    watchpoint(process& proc, virt_addr address, stoppoint_mode mode,
-               std::size_t size);
+    watchpoint(process& proc, virt_addr address, stoppoint_mode mode, std::size_t size);
 
     id_type id_;
     process* process_;

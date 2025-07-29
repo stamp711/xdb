@@ -15,12 +15,7 @@
 
 namespace xdb {
 
-enum class process_state : std::uint8_t {
-    running,
-    stopped,
-    exited,
-    terminated
-};
+enum class process_state : std::uint8_t { running, stopped, exited, terminated };
 
 struct stop_reason {
     stop_reason(int wait_status);
@@ -40,9 +35,8 @@ class process {
     ~process();
 
     // -- create by launching or attaching --
-    static std::unique_ptr<process> launch(
-        const std::filesystem::path &path, bool debug = true,
-        std::optional<int> stdout_replacement = std::nullopt);
+    static std::unique_ptr<process> launch(const std::filesystem::path &path, bool debug = true,
+                                           std::optional<int> stdout_replacement = std::nullopt);
     static std::unique_ptr<process> attach(pid_t pid);
 
     // -- process control --
@@ -59,18 +53,13 @@ class process {
     void write_gprs(const user_regs_struct &gprs);
     void write_fprs(const user_fpregs_struct &fprs);
     [[nodiscard]] virt_addr get_pc() const {
-        return virt_addr(
-            get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
+        return virt_addr(get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
     }
-    void set_pc(virt_addr addr) {
-        get_registers().write_by_id(register_id::rip, addr.addr());
-    }
+    void set_pc(virt_addr addr) { get_registers().write_by_id(register_id::rip, addr.addr()); }
 
     // -- memory read/write --
-    [[nodiscard]] std::vector<std::byte> read_memory(virt_addr addr,
-                                                     std::size_t size) const;
-    [[nodiscard]] std::vector<std::byte> read_memory_without_traps(
-        virt_addr addr, std::size_t size) const;
+    [[nodiscard]] std::vector<std::byte> read_memory(virt_addr addr, std::size_t size) const;
+    [[nodiscard]] std::vector<std::byte> read_memory_without_traps(virt_addr addr, std::size_t size) const;
     void write_memory(virt_addr addr, std::span<const std::byte> data);
     template <typename T>
     [[nodiscard]] T read_memory_as(virt_addr address) const {
@@ -79,26 +68,14 @@ class process {
     }
 
     // -- breakpoint sites --
-    breakpoint_site &create_breakpoint_site(virt_addr addr,
-                                            bool hardware = false,
-                                            bool internal = false);
-    [[nodiscard]] stoppoint_collection<breakpoint_site> &breakpoint_sites() {
-        return breakpoint_sites_;
-    }
-    [[nodiscard]] const stoppoint_collection<breakpoint_site> &
-    breakpoint_sites() const {
-        return breakpoint_sites_;
-    }
+    breakpoint_site &create_breakpoint_site(virt_addr addr, bool hardware = false, bool internal = false);
+    [[nodiscard]] stoppoint_collection<breakpoint_site> &breakpoint_sites() { return breakpoint_sites_; }
+    [[nodiscard]] const stoppoint_collection<breakpoint_site> &breakpoint_sites() const { return breakpoint_sites_; }
 
     // -- watchpoint sites --
-    watchpoint &create_watchpoint(virt_addr addr, stoppoint_mode mode,
-                                  std::size_t size);
-    [[nodiscard]] stoppoint_collection<watchpoint> &watchpoints() {
-        return watchpoints_;
-    }
-    [[nodiscard]] const stoppoint_collection<watchpoint> &watchpoints() const {
-        return watchpoints_;
-    }
+    watchpoint &create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
+    [[nodiscard]] stoppoint_collection<watchpoint> &watchpoints() { return watchpoints_; }
+    [[nodiscard]] const stoppoint_collection<watchpoint> &watchpoints() const { return watchpoints_; }
 
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
@@ -111,8 +88,7 @@ class process {
 
     // -- for friend classes - TODO: finer access control --
     friend class breakpoint_site, watchpoint;
-    int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
-                               std::size_t size);
+    int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
     void clear_hardware_stoppoint(int hw_stoppoint_index);
 
     pid_t pid_ = 0;

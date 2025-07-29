@@ -85,15 +85,13 @@ std::unique_ptr<process> process::attach(pid_t pid) {
 
 void exit_with_perror(pipe &p, const std::string &prefix) {
     auto message = prefix + ": " + strerror(errno);
-    p.write(reinterpret_cast<const std::byte *>(message.data()),
-            message.size());
+    p.write(reinterpret_cast<const std::byte *>(message.data()), message.size());
     p.close_write();
     ::exit(-1);
 }
 
-std::unique_ptr<process> process::launch(
-    const std::filesystem::path &path, bool debug,
-    std::optional<int> stdout_replacement) {
+std::unique_ptr<process> process::launch(const std::filesystem::path &path, bool debug,
+                                         std::optional<int> stdout_replacement) {
     pipe p(true);  // Create a pipe with close-on-exec
 
     pid_t pid = fork();
@@ -203,8 +201,7 @@ stop_reason process::wait_on_signal() {
         // NOTE: if the breakpoint is not created by xdb, pc will remain to be
         // the next instruction
         auto prev = get_pc() - 1;
-        if (reason.info == SIGTRAP &&
-            breakpoint_sites_.enabled_stoppoint_address(prev)) {
+        if (reason.info == SIGTRAP && breakpoint_sites_.enabled_stoppoint_address(prev)) {
             set_pc(prev);
         }
     }
@@ -257,14 +254,12 @@ stop_reason::stop_reason(int wait_status) {
 
 void process::read_all_registers() {
     // Read general-purpose registers
-    if (ptrace(PTRACE_GETREGS, pid_, nullptr, &get_registers().data_.regs) ==
-        -1) {
+    if (ptrace(PTRACE_GETREGS, pid_, nullptr, &get_registers().data_.regs) == -1) {
         error::send_errno("PTRACE_GETREGS failed");
     }
 
     // Read floating-point registers
-    if (ptrace(PTRACE_GETFPREGS, pid_, nullptr, &get_registers().data_.i387) ==
-        -1) {
+    if (ptrace(PTRACE_GETFPREGS, pid_, nullptr, &get_registers().data_.i387) == -1) {
         error::send_errno("PTRACE_GETFPREGS failed");
     }
 
@@ -275,8 +270,7 @@ void process::read_all_registers() {
         auto offset = register_info_by_id(static_cast<register_id>(id)).offset;
 
         errno = 0;  // Reset errno before each ptrace call
-        auto data = static_cast<std::uint64_t>(
-            ptrace(PTRACE_PEEKUSER, pid_, offset, nullptr));
+        auto data = static_cast<std::uint64_t>(ptrace(PTRACE_PEEKUSER, pid_, offset, nullptr));
         if (errno != 0) {
             error::send_errno("PTRACE_PEEKUSER failed for debug register");
         }
@@ -312,8 +306,7 @@ void process::write_fprs(const user_fpregs_struct &fprs) {
     }
 }
 
-std::vector<std::byte> process::read_memory(virt_addr addr,
-                                            std::size_t size) const {
+std::vector<std::byte> process::read_memory(virt_addr addr, std::size_t size) const {
     // Prepare data buffer and local iovec
     std::vector<std::byte> data(size);
     ::iovec local_iov = {.iov_base = data.data(), .iov_len = data.size()};
@@ -323,29 +316,25 @@ std::vector<std::byte> process::read_memory(virt_addr addr,
     while (size > 0) {
         auto size_to_next_page_boundary = PAGE_SIZE - (addr.addr() & PAGE_MASK);
         auto iov_len = std::min(size, size_to_next_page_boundary);
-        remote_iovs.emplace_back(::iovec{
-            .iov_base =
-                /* NOLINT(performance-no-int-to-ptr) */ reinterpret_cast<
-                    void *>(addr.addr()),
-            .iov_len = iov_len});
+        remote_iovs.emplace_back(
+            ::iovec{.iov_base =
+                        /* NOLINT(performance-no-int-to-ptr) */ reinterpret_cast<void *>(addr.addr()),
+                    .iov_len = iov_len});
 
         addr += iov_len;
         size -= iov_len;
     }
 
-    if (::process_vm_readv(pid_, &local_iov, 1, remote_iovs.data(),
-                           remote_iovs.size(), 0) == -1) {
+    if (::process_vm_readv(pid_, &local_iov, 1, remote_iovs.data(), remote_iovs.size(), 0) == -1) {
         error::send_errno("process_vm_readv failed");
     }
 
     return data;
 }
 
-[[nodiscard]] std::vector<std::byte> process::read_memory_without_traps(
-    virt_addr addr, std::size_t size) const {
+[[nodiscard]] std::vector<std::byte> process::read_memory_without_traps(virt_addr addr, std::size_t size) const {
     auto memory = read_memory(addr, size);
-    for (const auto &bp :
-         breakpoint_sites_.get_in_address_range(addr, addr + size)) {
+    for (const auto &bp : breakpoint_sites_.get_in_address_range(addr, addr + size)) {
         if (!bp->is_enabled() || bp->is_hardware()) {
             continue;
         }
@@ -374,16 +363,14 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
         if (word_start < addr || end_addr < word_end) {
             // Read the original word
             errno = 0;
-            word = static_cast<uint64_t>(
-                ::ptrace(PTRACE_PEEKDATA, pid_, word_start.addr(), nullptr));
+            word = static_cast<uint64_t>(::ptrace(PTRACE_PEEKDATA, pid_, word_start.addr(), nullptr));
             if (errno != 0) {
                 error::send_errno("ptrace PEEKDATA failed");
             }
         }
 
         // Copy the data into the word to write
-        std::memcpy(reinterpret_cast<char *>(&word) + offset, data.data(),
-                    size);
+        std::memcpy(reinterpret_cast<char *>(&word) + offset, data.data(), size);
 
         if (::ptrace(PTRACE_POKEDATA, pid_, word_start.addr(), word) == -1) {
             error::send_errno("ptrace POKEDATA failed");
@@ -394,30 +381,23 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
     }
 }
 
-breakpoint_site &process::create_breakpoint_site(virt_addr address,
-                                                 bool hardware, bool internal) {
+breakpoint_site &process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) {
     if (breakpoint_sites_.contains_address(address)) {
-        error::send("Breakpoint site already exists at address " +
-                    std::to_string(address.addr()));
+        error::send("Breakpoint site already exists at address " + std::to_string(address.addr()));
     }
-    auto bp_site = std::unique_ptr<breakpoint_site>(
-        new breakpoint_site(*this, address, hardware, internal));
+    auto bp_site = std::unique_ptr<breakpoint_site>(new breakpoint_site(*this, address, hardware, internal));
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
-watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode,
-                                       std::size_t size) {
+watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
     if (watchpoints_.contains_address(addr)) {
-        error::send("Watchpoint already exists at address " +
-                    std::to_string(addr.addr()));
+        error::send("Watchpoint already exists at address " + std::to_string(addr.addr()));
     }
-    auto wp =
-        std::unique_ptr<watchpoint>(new watchpoint(*this, addr, mode, size));
+    auto wp = std::unique_ptr<watchpoint>(new watchpoint(*this, addr, mode, size));
     return watchpoints_.push(std::move(wp));
 }
 
-int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
-                                    std::size_t size) {
+int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
 
@@ -426,8 +406,7 @@ int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
 
     // Find a free slot for the stoppoint
     int slot = find_free_stoppoint_register(control);
-    auto dr_id =
-        static_cast<register_id>(static_cast<int>(register_id::dr0) + slot);
+    auto dr_id = static_cast<register_id>(static_cast<int>(register_id::dr0) + slot);
 
     // Calculate the control bits locations for the stoppoint
     constexpr auto DR7_MODE_BITS_OFFSET = 16;
@@ -436,12 +415,10 @@ int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
     auto size_bits_location = mode_bits_location + 2;
 
     // Calculate the control bits for the stoppoint
-    std::uint64_t mask = (0b11ULL << enable_bits_location) |
-                         (0b11ULL << mode_bits_location) |
-                         (0b11ULL << size_bits_location);
-    std::uint64_t flag = (0b01ULL << enable_bits_location) |
-                         (mode_flag << mode_bits_location) |
-                         (size_flag << size_bits_location);
+    std::uint64_t mask =
+        (0b11ULL << enable_bits_location) | (0b11ULL << mode_bits_location) | (0b11ULL << size_bits_location);
+    std::uint64_t flag =
+        (0b01ULL << enable_bits_location) | (mode_flag << mode_bits_location) | (size_flag << size_bits_location);
 
     // Set the control bits for the stoppoint
     control &= ~mask;

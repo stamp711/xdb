@@ -61,8 +61,7 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
     return tokens;
 }
 
-void print_stop_reason(const xdb::process &process,
-                       const xdb::stop_reason &reason) {
+void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reason) {
     std::string message;
     const char *sig = nullptr;
     switch (reason.state) {
@@ -71,8 +70,7 @@ void print_stop_reason(const xdb::process &process,
             break;
         case xdb::process_state::stopped:
             sig = sigabbrev_np(reason.info);
-            message = fmt::format("stopped by signal {} at {:#x}", sig,
-                                  process.get_pc().addr());
+            message = fmt::format("stopped by signal {} at {:#x}", sig, process.get_pc().addr());
             break;
         case xdb::process_state::exited:
             message = fmt::format("exited with status {}", reason.info);
@@ -87,13 +85,11 @@ void print_stop_reason(const xdb::process &process,
     fmt::println("Process {} {}", process.pid(), message);
 }
 
-void print_disassembly(xdb::process &process, xdb::virt_addr address,
-                       std::size_t n_instructions) {
+void print_disassembly(xdb::process &process, xdb::virt_addr address, std::size_t n_instructions) {
     xdb::disassembler dis(process);
     auto instructions = dis.disassemble(n_instructions, address);
     for (const auto &instruction : instructions) {
-        fmt::println("{:08x}: {}", instruction.address.addr(),
-                     instruction.text);
+        fmt::println("{:08x}: {}", instruction.address.addr(), instruction.text);
     }
 }
 
@@ -117,72 +113,56 @@ void print_help(std::span<const std::string> args) {
                   << "    stepi, si          - Single step an instruction\n"
                   << "    watchpoint, w      - Manage watchpoints\n";
     } else if (args[1] == "breakpoint" || args[1] == "b") {
-        std::cout
-            << "Manage breakpoints.\n"
-            << "Usage:\n"
-            << "    breakpoint list             - List all breakpoints\n"
-            << "    breakpoint set <address>    - Set a breakpoint at the "
-               "specified address\n"
-            << "    breakpoint set <address> --hardware/-h"
-            << "                                - Set a hardware breakpoint at "
-               "the specified address\n"
-            << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
-            << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
-            << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
+        std::cout << "Manage breakpoints.\n"
+                  << "Usage:\n"
+                  << "    breakpoint list             - List all breakpoints\n"
+                  << "    breakpoint set <address>    - Set a breakpoint at the specified address\n"
+                  << "    breakpoint set <address> --hardware/-h"
+                  << "                                - Set a hardware breakpoint at the specified address\n"
+                  << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
+                  << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
+                  << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
     } else if (args[1] == "watchpoint" || args[1] == "w") {
-        std::cout
-            << "Manage watchpoints.\n"
-            << "Usage:\n"
-            << "    watchpoint list                       - List all "
-               "watchpoints\n"
-            << "    watchpoint set <address> <mode> <size> - Set a watchpoint\n"
-            << "    watchpoint enable <id>                - Enable a "
-               "watchpoint by ID\n"
-            << "    watchpoint disable <id>               - Disable a "
-               "watchpoint by ID\n"
-            << "    watchpoint delete <id>                - Delete a "
-               "watchpoint by ID\n"
-            << "Modes:\n"
-            << "    write                                 - Break on write "
-               "access\n"
-            << "    read_write, rw                        - Break on read or "
-               "write access\n"
-            << "    execute                               - Break on "
-               "execution\n"
-            << "Size:\n"
-            << "    1, 2, 4, 8                           - Number of bytes to "
-               "watch\n"
-            << "Examples:\n"
-            << "    watchpoint set 0x401000 write 4\n"
-            << "    watchpoint set 0x7fff12345678 read_write 8\n";
+        std::cout << "Manage watchpoints.\n"
+                  << "Usage:\n"
+                  << "    watchpoint list                        - List all watchpoints\n"
+                  << "    watchpoint set <address> <mode> <size> - Set a watchpoint\n"
+                  << "    watchpoint enable <id>                 - Enable a watchpoint by ID\n"
+                  << "    watchpoint disable <id>                - Disable a watchpoint by ID\n"
+                  << "    watchpoint delete <id>                 - Delete a watchpoint by ID\n"
+                  << "Modes:\n"
+                  << "    write                                  - Break on write access\n"
+                  << "    read_write, rw                         - Break on read or write access\n"
+                  << "    execute                                - Break on execution\n"
+                  << "Size:\n"
+                  << "    1, 2, 4, 8                             - Number of bytes to watch\n"
+                  << "Examples:\n"
+                  << "    watchpoint set 0x401000 write 4\n"
+                  << "    watchpoint set 0x7fff12345678 read_write 8\n";
     } else if (args[1] == "continue" || args[1] == "c") {
         std::cout << "Resume the process.\n";
     } else if (args[1] == "disassemble" || args[1] == "disas") {
-        std::cout
-            << "Disassemble instructions.\n"
-            << "Usage:\n"
-            << "    disassemble [-c <count>] [-a <address>]\n"
-            << "    disas [-c <count>] [-a <address>]\n"
-            << "Options:\n"
-            << "    -c <count>     - Number of instructions to disassemble "
-               "(default: 5)\n"
-            << "    -a <address>   - Starting address (default: current PC)\n"
-            << "Examples:\n"
-            << "    disas\n"
-            << "    disas -c 10\n"
-            << "    disas -a 0x401000\n"
-            << "    disas -c 8 -a 0x401000\n";
+        std::cout << "Disassemble instructions.\n"
+                  << "Usage:\n"
+                  << "    disassemble [-c <count>] [-a <address>]\n"
+                  << "    disas [-c <count>] [-a <address>]\n"
+                  << "Options:\n"
+                  << "    -c <count>     - Number of instructions to disassemble (default: 5)\n"
+                  << "    -a <address>   - Starting address (default: current PC)\n"
+                  << "Examples:\n"
+                  << "    disas\n"
+                  << "    disas -c 10\n"
+                  << "    disas -a 0x401000\n"
+                  << "    disas -c 8 -a 0x401000\n";
     } else if (args[1] == "memory" || args[1] == "mem") {
-        std::cout
-            << "Memory operations.\n"
-            << "Usage:\n"
-            << "    memory read <address> [size]     - Read memory at address "
-               "(default size: 32 bytes)\n"
-            << "    memory write <address> <data>    - Write data to memory\n"
-            << "Examples:\n"
-            << "    memory read 0x555555555156\n"
-            << "    memory read 0x555555555156 16\n"
-            << "    memory write 0x555555555156 [0xff,0xaa,0x11]\n";
+        std::cout << "Memory operations.\n"
+                  << "Usage:\n"
+                  << "    memory read <address> [size]     - Read memory at address (default size: 32 bytes)\n"
+                  << "    memory write <address> <data>    - Write data to memory\n"
+                  << "Examples:\n"
+                  << "    memory read 0x555555555156\n"
+                  << "    memory read 0x555555555156 16\n"
+                  << "    memory write 0x555555555156 [0xff,0xaa,0x11]\n";
     } else if (args[1] == "register" || args[1] == "reg") {
         std::cout << "Usage:\n"
                   << "    register read\n"
@@ -202,8 +182,7 @@ void print_help_init(std::initializer_list<std::string> args_list) {
     print_help(std::span<const std::string>(args_vec));
 }
 
-void handle_register_read(xdb::process &process,
-                          std::span<const std::string> args) {
+void handle_register_read(xdb::process &process, std::span<const std::string> args) {
     auto format = [](auto value) {
         if constexpr (std::is_floating_point_v<decltype(value)>) {
             return fmt::format("{}", value);
@@ -217,8 +196,7 @@ void handle_register_read(xdb::process &process,
     if (args.size() == 2 || (args.size() == 3 && args[2] == "all")) {
         auto all = args.size() == 3;
         for (const auto &info : xdb::g_register_infos) {
-            auto is_gpr = info.type == xdb::register_type::gpr &&
-                          info.id != xdb::register_id::orig_rax;
+            auto is_gpr = info.type == xdb::register_type::gpr && info.id != xdb::register_id::orig_rax;
             auto should_print = all || is_gpr;
             if (should_print) {
                 auto value = process.get_registers().read(info);
@@ -238,24 +216,19 @@ void handle_register_read(xdb::process &process,
     }
 }
 
-xdb::registers::value parse_register_value(const xdb::register_info &info,
-                                           const std::string &value_str) {
+xdb::registers::value parse_register_value(const xdb::register_info &info, const std::string &value_str) {
     try {
         switch (info.format) {
             case xdb::register_format::uint:
                 switch (info.size) {
                     case sizeof(std::uint8_t):
-                        return xdb::to_integral<std::uint8_t>(value_str)
-                            .value();
+                        return xdb::to_integral<std::uint8_t>(value_str).value();
                     case sizeof(std::uint16_t):
-                        return xdb::to_integral<std::uint16_t>(value_str)
-                            .value();
+                        return xdb::to_integral<std::uint16_t>(value_str).value();
                     case sizeof(std::uint32_t):
-                        return xdb::to_integral<std::uint32_t>(value_str)
-                            .value();
+                        return xdb::to_integral<std::uint32_t>(value_str).value();
                     case sizeof(std::uint64_t):
-                        return xdb::to_integral<std::uint64_t>(value_str)
-                            .value();
+                        return xdb::to_integral<std::uint64_t>(value_str).value();
                     default:
                         break;
                 }
@@ -276,8 +249,7 @@ xdb::registers::value parse_register_value(const xdb::register_info &info,
     xdb::error::send("Invalid format");
 }
 
-void handle_register_write(xdb::process &process,
-                           std::span<const std::string> args) {
+void handle_register_write(xdb::process &process, std::span<const std::string> args) {
     if (args.size() != 4) {
         print_help_init({"help", "register"});
         return;
@@ -291,8 +263,7 @@ void handle_register_write(xdb::process &process,
     }
 }
 
-void handle_register_command(xdb::process &process,
-                             std::span<const std::string> args) {
+void handle_register_command(xdb::process &process, std::span<const std::string> args) {
     if (args.size() < 2) {
         print_help_init({"help", "register"});
         return;
@@ -317,8 +288,7 @@ void print_all_breakpoints(xdb::process &process) {
         if (breakpoint_site.is_internal()) {
             return;  // Skip internal breakpoints
         }
-        fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(),
-                     breakpoint_site.address().addr(),
+        fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(), breakpoint_site.address().addr(),
                      breakpoint_site.is_enabled() ? "enabled" : "disabled");
     });
 }
@@ -342,15 +312,12 @@ void print_all_watchpoints(xdb::process &process) {
                 mode_str = "execute";
                 break;
         }
-        fmt::println("{}: address = {:#x}, mode = {}, size = {}, {}",
-                     watchpoint.id(), watchpoint.address().addr(), mode_str,
-                     watchpoint.size(),
-                     watchpoint.is_enabled() ? "enabled" : "disabled");
+        fmt::println("{}: address = {:#x}, mode = {}, size = {}, {}", watchpoint.id(), watchpoint.address().addr(),
+                     mode_str, watchpoint.size(), watchpoint.is_enabled() ? "enabled" : "disabled");
     });
 }
 
-void handle_breakpoint_command(xdb::process &process,
-                               std::span<const std::string> args) {
+void handle_breakpoint_command(xdb::process &process, std::span<const std::string> args) {
     auto phelp = []() { print_help_init({"help", "breakpoint"}); };
 
     if (args.size() < 2) {
@@ -383,8 +350,7 @@ void handle_breakpoint_command(xdb::process &process,
                 xdb::error::send("Invalid argument");
             }
         }
-        process.create_breakpoint_site(xdb::virt_addr{*address}, hardware)
-            .enable();
+        process.create_breakpoint_site(xdb::virt_addr{*address}, hardware).enable();
         return;
     }
 
@@ -392,8 +358,7 @@ void handle_breakpoint_command(xdb::process &process,
         phelp();
         return;
     }
-    auto breakpoint_id =
-        xdb::to_integral<xdb::breakpoint_site::id_type>(args[2]);
+    auto breakpoint_id = xdb::to_integral<xdb::breakpoint_site::id_type>(args[2]);
     if (!breakpoint_id) {
         fmt::println("Command expects valid breakpoint ID");
         return;
@@ -411,8 +376,7 @@ void handle_breakpoint_command(xdb::process &process,
     }
 }
 
-void handle_watchpoint_command(xdb::process &process,
-                               std::span<const std::string> args) {
+void handle_watchpoint_command(xdb::process &process, std::span<const std::string> args) {
     auto phelp = []() { print_help_init({"help", "watchpoint"}); };
 
     if (args.size() < 2) {
@@ -459,8 +423,7 @@ void handle_watchpoint_command(xdb::process &process,
         }
 
         try {
-            process.create_watchpoint(xdb::virt_addr{*address}, mode, *size)
-                .enable();
+            process.create_watchpoint(xdb::virt_addr{*address}, mode, *size).enable();
             fmt::println("Watchpoint set at {:#x}", *address);
         } catch (const std::exception &e) {
             fmt::println("Error setting watchpoint: {}", e.what());
@@ -505,8 +468,7 @@ void handle_watchpoint_command(xdb::process &process,
     }
 }
 
-void handle_memory_read(xdb::process &process,
-                        std::span<const std::string> args) {
+void handle_memory_read(xdb::process &process, std::span<const std::string> args) {
     constexpr std::size_t default_read_bytes = 32;
     constexpr std::size_t bytes_per_line = 16;
 
@@ -518,8 +480,7 @@ void handle_memory_read(xdb::process &process,
     constexpr int hex_base = 16;
     auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
     if (!address) {
-        std::cerr
-            << "Invalid address format. Use 0x prefix for hex addresses.\n";
+        std::cerr << "Invalid address format. Use 0x prefix for hex addresses.\n";
         return;
     }
 
@@ -541,8 +502,7 @@ void handle_memory_read(xdb::process &process,
             fmt::print("{:#016x}: ", *address + i);
 
             // Print hex bytes (max 16 per line)
-            for (std::size_t j = 0; j < bytes_per_line && i + j < data.size();
-                 ++j) {
+            for (std::size_t j = 0; j < bytes_per_line && i + j < data.size(); ++j) {
                 fmt::print("{:02x} ", static_cast<std::uint8_t>(data[i + j]));
             }
 
@@ -553,8 +513,7 @@ void handle_memory_read(xdb::process &process,
     }
 }
 
-void handle_memory_write(xdb::process &process,
-                         std::span<const std::string> args) {
+void handle_memory_write(xdb::process &process, std::span<const std::string> args) {
     if (args.size() < 4) {
         print_help_init({"help", "memory"});
         return;
@@ -563,8 +522,7 @@ void handle_memory_write(xdb::process &process,
     constexpr int hex_base = 16;
     auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
     if (!address) {
-        std::cerr
-            << "Invalid address format. Use 0x prefix for hex addresses.\n";
+        std::cerr << "Invalid address format. Use 0x prefix for hex addresses.\n";
         return;
     }
 
@@ -575,10 +533,8 @@ void handle_memory_write(xdb::process &process,
             return;
         }
 
-        process.write_memory(xdb::virt_addr{*address},
-                             std::span<const std::byte>(bytes));
-        fmt::println("Successfully wrote {} bytes to {:#x}", bytes.size(),
-                     *address);
+        process.write_memory(xdb::virt_addr{*address}, std::span<const std::byte>(bytes));
+        fmt::println("Successfully wrote {} bytes to {:#x}", bytes.size(), *address);
 
         // Show what was written
         fmt::print("Data written: [");
@@ -595,8 +551,7 @@ void handle_memory_write(xdb::process &process,
     }
 }
 
-void handle_memory_command(xdb::process &process,
-                           std::span<const std::string> args) {
+void handle_memory_command(xdb::process &process, std::span<const std::string> args) {
     if (args.size() < 2) {
         print_help_init({"help", "memory"});
         return;
@@ -611,8 +566,7 @@ void handle_memory_command(xdb::process &process,
     }
 }
 
-void handle_disassemble_command(xdb::process &process,
-                                std::span<const std::string> args) {
+void handle_disassemble_command(xdb::process &process, std::span<const std::string> args) {
     auto address = process.get_pc();
     constexpr std::size_t default_instruction_count = 5;
     std::size_t n_instructions = default_instruction_count;
@@ -631,9 +585,7 @@ void handle_disassemble_command(xdb::process &process,
             constexpr int hex_base = 16;
             auto addr = xdb::to_integral<std::uint64_t>(args[i + 1], hex_base);
             if (!addr) {
-                fmt::println(
-                    "Invalid address format. Address is expected in "
-                    "0xhex format.");
+                fmt::println("Invalid address format. Address is expected in 0xhex format.");
                 return;
             }
             address = xdb::virt_addr{*addr};
@@ -644,8 +596,7 @@ void handle_disassemble_command(xdb::process &process,
     print_disassembly(process, address, n_instructions);
 }
 
-void handle_command(std::unique_ptr<xdb::process> &process,
-                    std::string_view line) {
+void handle_command(std::unique_ptr<xdb::process> &process, std::string_view line) {
     auto args = split(line, ' ');
     const auto &command = args[0];
 
@@ -661,8 +612,7 @@ void handle_command(std::unique_ptr<xdb::process> &process,
             auto reason = process->wait_on_signal();
             handle_stop(*process, reason);
         } else {
-            std::cerr
-                << "Cannot continue because process state is not stopped\n";
+            std::cerr << "Cannot continue because process state is not stopped\n";
         }
     } else if (command == "disassemble" || command == "disas") {
         handle_disassemble_command(*process, args);
@@ -700,8 +650,7 @@ int run(std::span<const char *const> args) {
         if (std::string_view(line) == "") {
             // empty input is a shortcut for the last command
             if (history_length > 0) {
-                line_string =
-                    history_get(history_length)->line;  // 1-based index
+                line_string = history_get(history_length)->line;  // 1-based index
             }
         } else {
             line_string = line;

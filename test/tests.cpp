@@ -38,23 +38,20 @@ char get_process_status(pid_t pid) {
 std::filesystem::path test_path() {
     constexpr std::size_t MAX_PATH_LENGTH = 1024;
     std::array<char, MAX_PATH_LENGTH> exe_path{};
-    ssize_t count =
-        readlink("/proc/self/exe", exe_path.data(), exe_path.size());
+    ssize_t count = readlink("/proc/self/exe", exe_path.data(), exe_path.size());
     if (count == -1) {
         throw std::runtime_error("Failed to read /proc/self/exe");
     }
     return std::filesystem::path(exe_path.data()).parent_path();
 }
 
-std::uint64_t get_elf_file_offset_of_address(const std::filesystem::path& path,
-                                             std::uint64_t file_address) {
+std::uint64_t get_elf_file_offset_of_address(const std::filesystem::path& path, std::uint64_t file_address) {
     std::string command = "readelf -WS " + path.string();
     auto* pipe = ::popen(command.c_str(), "r");
     if (pipe == nullptr) xdb::error::send_errno("popen errir");
 
     // Auto close pipe
-    auto pipe_guard = std::unique_ptr<FILE, std::function<void(FILE*)>>(
-        pipe, [](FILE* p) { ::pclose(p); });
+    auto pipe_guard = std::unique_ptr<FILE, std::function<void(FILE*)>>(pipe, [](FILE* p) { ::pclose(p); });
 
     // Type            Address          Off    Size
     // PROGBITS        0000000000001040 001040 000113
@@ -65,11 +62,10 @@ std::uint64_t get_elf_file_offset_of_address(const std::filesystem::path& path,
     std::size_t len = 0;
 
     // Auto free line
-    std::unique_ptr<void, std::function<void(void*)>> line_guard(
-        nullptr, [&line](void*) {
-            // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
-            ::free(line);
-        });
+    std::unique_ptr<void, std::function<void(void*)>> line_guard(nullptr, [&line](void*) {
+        // NOLINTNEXTLINE(cppcoreguidelines-no-malloc,cppcoreguidelines-owning-memory)
+        ::free(line);
+    });
 
     // getline will realloc() if needed
     while (::getline(&line, &len, pipe) > 0) {
@@ -122,8 +118,7 @@ xdb::virt_addr get_load_address(pid_t pid, file_offset offset_in_file) {
             auto file_offset = std::stoull(match[3], nullptr, HEX_BASE);
             if (perm_char == 'x') {
                 // This is the first executable mapping
-                return xdb::virt_addr(start_addr +
-                                      (offset_in_file.value - file_offset));
+                return xdb::virt_addr(start_addr + (offset_in_file.value - file_offset));
             }
         }
     }
@@ -139,20 +134,16 @@ TEST_CASE("process::launch success", "[process]") {
 }
 
 TEST_CASE("process::launch failure", "[process]") {
-    REQUIRE_THROWS_AS(xdb::process::launch(test_path() / "/bin/doesnotexist"),
-                      xdb::error);
+    REQUIRE_THROWS_AS(xdb::process::launch(test_path() / "/bin/doesnotexist"), xdb::error);
 }
 
 TEST_CASE("process::attach success", "[process]") {
-    auto launched =
-        xdb::process::launch(test_path() / "targets/run_endlessly", false);
+    auto launched = xdb::process::launch(test_path() / "targets/run_endlessly", false);
     auto attached = xdb::process::attach(launched->pid());
     REQUIRE(get_process_status(launched->pid()) == 't');
 }
 
-TEST_CASE("process::attach invalid PID", "[process]") {
-    REQUIRE_THROWS_AS(xdb::process::attach(0), xdb::error);
-}
+TEST_CASE("process::attach invalid PID", "[process]") { REQUIRE_THROWS_AS(xdb::process::attach(0), xdb::error); }
 
 TEST_CASE("process::resume success", "[process]") {
     auto proc = xdb::process::launch(test_path() / "targets/run_endlessly");
@@ -170,8 +161,7 @@ TEST_CASE("process::resume already terminated", "[process]") {
 TEST_CASE("Write registers", "[register]") {
     xdb::pipe channel(false);
 
-    auto proc = xdb::process::launch(test_path() / "targets/reg_write", true,
-                                     channel.get_write());
+    auto proc = xdb::process::launch(test_path() / "targets/reg_write", true, channel.get_write());
     channel.close_write();
 
     // Wait for the process to trap itself
@@ -206,10 +196,8 @@ TEST_CASE("Write registers", "[register]") {
 
     // x87 st0
     constexpr long double st0_test_value = 12.21L;
-    constexpr std::uint16_t fsw_value =
-        0b0011100000000000;  // bits 11-13 track top of the stack
-    constexpr std::uint16_t ftw_value =
-        0b0011111111111111;  // 00 means valid, 11 means empty
+    constexpr std::uint16_t fsw_value = 0b0011100000000000;  // bits 11-13 track top of the stack
+    constexpr std::uint16_t ftw_value = 0b0011111111111111;  // 00 means valid, 11 means empty
     regs.write_by_id(xdb::register_id::st0, st0_test_value);
     regs.write_by_id(xdb::register_id::fsw, fsw_value);
     regs.write_by_id(xdb::register_id::ftw, ftw_value);
@@ -226,20 +214,17 @@ TEST_CASE("Read registers", "[register]") {
     // r13
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<std::uint64_t>(xdb::register_id::r13) ==
-            0xdeadbeefcafebabe);
+    REQUIRE(regs.read_by_id_as<std::uint64_t>(xdb::register_id::r13) == 0xdeadbeefcafebabe);
 
     // r13d
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<std::uint32_t>(xdb::register_id::r13d) ==
-            0xabcdef01);
+    REQUIRE(regs.read_by_id_as<std::uint32_t>(xdb::register_id::r13d) == 0xabcdef01);
 
     // r13w
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<std::uint16_t>(xdb::register_id::r13w) ==
-            0x1234);
+    REQUIRE(regs.read_by_id_as<std::uint16_t>(xdb::register_id::r13w) == 0x1234);
 
     // r13b
     proc->resume();
@@ -254,22 +239,19 @@ TEST_CASE("Read registers", "[register]") {
     // mm0
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<xdb::byte64>(xdb::register_id::mm0) ==
-            xdb::to_byte64(0xba5eba11));
+    REQUIRE(regs.read_by_id_as<xdb::byte64>(xdb::register_id::mm0) == xdb::to_byte64(0xba5eba11));
 
     // xmm0
     constexpr double expected_xmm0_value = 42.25;
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<xdb::byte128>(xdb::register_id::xmm0) ==
-            xdb::to_byte128(expected_xmm0_value));
+    REQUIRE(regs.read_by_id_as<xdb::byte128>(xdb::register_id::xmm0) == xdb::to_byte128(expected_xmm0_value));
 
     // st0
     constexpr long double expected_st0_value = 42.25L;
     proc->resume();
     proc->wait_on_signal();
-    REQUIRE(regs.read_by_id_as<long double>(xdb::register_id::st0) ==
-            expected_st0_value);
+    REQUIRE(regs.read_by_id_as<long double>(xdb::register_id::st0) == expected_st0_value);
 }
 
 TEST_CASE("Create breakpoint site", "[breakpoint]") {
@@ -361,23 +343,18 @@ TEST_CASE("Breakpoint sites iteration", "[breakpoint]") {
         proc->create_breakpoint_site(xdb::virt_addr(addr++));
     }
 
-    cbps.for_each([addr = start_address](auto& bp) mutable {
-        REQUIRE(bp.address().addr() == addr++);
-    });
+    cbps.for_each([addr = start_address](auto& bp) mutable { REQUIRE(bp.address().addr() == addr++); });
 }
 
 TEST_CASE("Set breakpoint on entry point", "[breakpoint]") {
     bool close_on_exec = false;
     xdb::pipe channel(close_on_exec);
 
-    auto proc = xdb::process::launch(test_path() / "targets/hello", true,
-                                     channel.get_write());
+    auto proc = xdb::process::launch(test_path() / "targets/hello", true, channel.get_write());
     channel.close_write();
 
-    auto entrypoint_offset =
-        get_entry_point_offset(test_path() / "targets/hello");
-    auto entrypoint_va =
-        get_load_address(proc->pid(), file_offset(entrypoint_offset));
+    auto entrypoint_offset = get_entry_point_offset(test_path() / "targets/hello");
+    auto entrypoint_va = get_load_address(proc->pid(), file_offset(entrypoint_offset));
 
     proc->create_breakpoint_site(entrypoint_va).enable();
     proc->resume();
@@ -402,10 +379,8 @@ TEST_CASE("Set breakpoint on entry point", "[breakpoint]") {
 TEST_CASE("Remove breakpoint site", "[breakpoint]") {
     auto proc = xdb::process::launch(test_path() / "targets/end_immediately");
 
-    auto entrypoint_offset =
-        get_entry_point_offset(test_path() / "targets/hello");
-    auto entrypoint_va =
-        get_load_address(proc->pid(), file_offset(entrypoint_offset));
+    auto entrypoint_offset = get_entry_point_offset(test_path() / "targets/hello");
+    auto entrypoint_va = get_load_address(proc->pid(), file_offset(entrypoint_offset));
 
     // Add breakpoint and remove by id
     {
@@ -439,8 +414,7 @@ TEST_CASE("Remove breakpoint site", "[breakpoint]") {
 
 TEST_CASE("Reading and writing memory", "[memory]") {
     xdb::pipe channel(false);
-    auto proc = xdb::process::launch(test_path() / "targets/memory", true,
-                                     channel.get_write());
+    auto proc = xdb::process::launch(test_path() / "targets/memory", true, channel.get_write());
     channel.close_write();
 
     proc->resume();
@@ -449,8 +423,7 @@ TEST_CASE("Reading and writing memory", "[memory]") {
     // Read address of variable 'a' and verify its value
     auto addr_data = channel.read();
     auto a_address = *reinterpret_cast<const std::uint64_t*>(addr_data.data());
-    auto a_value =
-        proc->read_memory_as<std::uint64_t>(xdb::virt_addr(a_address));
+    auto a_value = proc->read_memory_as<std::uint64_t>(xdb::virt_addr(a_address));
     REQUIRE(a_value == 0xcafecafe);
 
     proc->resume();
@@ -461,8 +434,7 @@ TEST_CASE("Reading and writing memory", "[memory]") {
     addr_data = channel.read();
     auto b_address = *reinterpret_cast<const std::uint64_t*>(addr_data.data());
     proc->write_memory(xdb::virt_addr(b_address),
-                       {reinterpret_cast<const std::byte*>(test_str.c_str()),
-                        test_str.size() + 1});
+                       {reinterpret_cast<const std::byte*>(test_str.c_str()), test_str.size() + 1});
 
     proc->resume();
     proc->wait_on_signal();
@@ -475,15 +447,13 @@ TEST_CASE("Reading and writing memory", "[memory]") {
 TEST_CASE("Hardware breakpoint evades memory checksums", "[breakpoint]") {
     bool close_on_exec = false;
     xdb::pipe channel(close_on_exec);
-    auto proc = xdb::process::launch(test_path() / "targets/anti_debugger",
-                                     true, channel.get_write());
+    auto proc = xdb::process::launch(test_path() / "targets/anti_debugger", true, channel.get_write());
     channel.close_write();
 
     proc->resume();
     proc->wait_on_signal();
 
-    auto func =
-        xdb::virt_addr(xdb::from_bytes<std::uint64_t>(channel.read().data()));
+    auto func = xdb::virt_addr(xdb::from_bytes<std::uint64_t>(channel.read().data()));
 
     auto& soft = proc->create_breakpoint_site(func, false);
     soft.enable();
@@ -491,8 +461,7 @@ TEST_CASE("Hardware breakpoint evades memory checksums", "[breakpoint]") {
     proc->resume();
     proc->wait_on_signal();
 
-    REQUIRE(to_string_view(channel.read()) ==
-            "Putting pepperoni on pizza...\n");
+    REQUIRE(to_string_view(channel.read()) == "Putting pepperoni on pizza...\n");
 
     proc->breakpoint_sites().remove_by_id(soft.id());
     auto& hard = proc->create_breakpoint_site(func, true);
@@ -506,6 +475,5 @@ TEST_CASE("Hardware breakpoint evades memory checksums", "[breakpoint]") {
     proc->resume();
     proc->wait_on_signal();
 
-    REQUIRE(to_string_view(channel.read()) ==
-            "Putting pineapple on pizza...\n");
+    REQUIRE(to_string_view(channel.read()) == "Putting pineapple on pizza...\n");
 }

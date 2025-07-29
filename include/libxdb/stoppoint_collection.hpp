@@ -27,9 +27,7 @@ class stoppoint_collection {
         return *stoppoints_.back();
     }
 
-    [[nodiscard]] bool contains_id(typename Stoppoint::id_type id) const {
-        return find_by_id(id) != stoppoints_.end();
-    }
+    [[nodiscard]] bool contains_id(typename Stoppoint::id_type id) const { return find_by_id(id) != stoppoints_.end(); }
 
     [[nodiscard]] bool contains_address(virt_addr address) const {
         return find_by_address(address) != stoppoints_.end();
@@ -40,38 +38,28 @@ class stoppoint_collection {
         return it != stoppoints_.end() && (*it)->is_enabled();
     }
 
-    [[nodiscard]] Stoppoint& get_by_id(typename Stoppoint::id_type id) {
-        return get_by_id_impl(*this, id);
-    }
+    [[nodiscard]] Stoppoint& get_by_id(typename Stoppoint::id_type id) { return get_by_id_impl(*this, id); }
 
-    [[nodiscard]] const Stoppoint& get_by_id(
-        typename Stoppoint::id_type id) const {
-        return get_by_id_impl(*this, id);
-    }
+    [[nodiscard]] const Stoppoint& get_by_id(typename Stoppoint::id_type id) const { return get_by_id_impl(*this, id); }
 
-    [[nodiscard]] Stoppoint& get_by_address(virt_addr address) {
-        return get_by_address_impl(*this, address);
-    }
+    [[nodiscard]] Stoppoint& get_by_address(virt_addr address) { return get_by_address_impl(*this, address); }
 
     [[nodiscard]] const Stoppoint& get_by_address(virt_addr address) const {
         return get_by_address_impl(*this, address);
     }
 
-    [[nodiscard]] std::vector<Stoppoint*> get_in_address_range(virt_addr start,
-                                                               virt_addr end) {
+    [[nodiscard]] std::vector<Stoppoint*> get_in_address_range(virt_addr start, virt_addr end) {
         return get_in_address_range_impl(*this, start, end);
     }
 
-    [[nodiscard]] std::vector<const Stoppoint*> get_in_address_range(
-        virt_addr start, virt_addr end) const {
+    [[nodiscard]] std::vector<const Stoppoint*> get_in_address_range(virt_addr start, virt_addr end) const {
         return get_in_address_range_impl(*this, start, end);
     }
 
     void remove_by_id(typename Stoppoint::id_type id) {
         auto it = find_by_id(id);
         if (it == stoppoints_.end()) {
-            error::send("Stoppoint with id " + std::to_string(id) +
-                        " not found");
+            error::send("Stoppoint with id " + std::to_string(id) + " not found");
         }
         (*it)->disable();
         stoppoints_.erase(it);
@@ -80,8 +68,7 @@ class stoppoint_collection {
     void remove_by_address(virt_addr address) {
         auto it = find_by_address(address);
         if (it == stoppoints_.end()) {
-            error::send("Stoppoint with address " + to_string(address) +
-                        " not found");
+            error::send("Stoppoint with address " + to_string(address) + " not found");
         }
         (*it)->disable();
         stoppoints_.erase(it);
@@ -110,34 +97,26 @@ class stoppoint_collection {
     using points_t = std::vector<std::unique_ptr<Stoppoint>>;
 
     template <typename Collection>
-    [[nodiscard]] static auto& get_by_id_impl(Collection& self,
-                                              typename Stoppoint::id_type id) {
+    [[nodiscard]] static auto& get_by_id_impl(Collection& self, typename Stoppoint::id_type id) {
         auto it = self.find_by_id(id);
         if (it == self.stoppoints_.end()) {
-            error::send("Stoppoint with id " + std::to_string(id) +
-                        " not found");
+            error::send("Stoppoint with id " + std::to_string(id) + " not found");
         }
         return **it;
     }
 
     template <typename Collection>
-    [[nodiscard]] static auto& get_by_address_impl(Collection& self,
-                                                   virt_addr address) {
+    [[nodiscard]] static auto& get_by_address_impl(Collection& self, virt_addr address) {
         auto it = self.find_by_address(address);
         if (it == self.stoppoints_.end()) {
-            error::send("Stoppoint with address " + to_string(address) +
-                        " not found");
+            error::send("Stoppoint with address " + to_string(address) + " not found");
         }
         return **it;
     }
 
     template <typename Self>
-    [[nodiscard]] static auto get_in_address_range_impl(Self& self,
-                                                        virt_addr start,
-                                                        virt_addr end) {
-        std::vector<
-            std::conditional_t<std::is_const_v<std::remove_reference_t<Self>>,
-                               const Stoppoint*, Stoppoint*>>
+    [[nodiscard]] static auto get_in_address_range_impl(Self& self, virt_addr start, virt_addr end) {
+        std::vector<std::conditional_t<std::is_const_v<std::remove_reference_t<Self>>, const Stoppoint*, Stoppoint*>>
             result;
         for (auto& stoppoint : self.stoppoints_) {
             if (stoppoint->in_range(start, end)) {
@@ -148,28 +127,21 @@ class stoppoint_collection {
     }
 
     template <typename Collection>
-    static auto find_by_id_impl(Collection& self,
-                                typename Stoppoint::id_type id) {
+    static auto find_by_id_impl(Collection& self, typename Stoppoint::id_type id) {
         return std::find_if(self.stoppoints_.begin(), self.stoppoints_.end(),
                             [&](const auto& p) { return p->id() == id; });
     }
-    typename points_t::iterator find_by_id(typename Stoppoint::id_type id) {
-        return find_by_id_impl(*this, id);
-    }
-    typename points_t::const_iterator find_by_id(
-        typename Stoppoint::id_type id) const {
+    typename points_t::iterator find_by_id(typename Stoppoint::id_type id) { return find_by_id_impl(*this, id); }
+    typename points_t::const_iterator find_by_id(typename Stoppoint::id_type id) const {
         return find_by_id_impl(*this, id);
     }
 
     template <typename Collection>
     static auto find_by_address_impl(Collection& self, virt_addr address) {
-        return std::find_if(
-            self.stoppoints_.begin(), self.stoppoints_.end(),
-            [&](const auto& p) { return p->address() == address; });
+        return std::find_if(self.stoppoints_.begin(), self.stoppoints_.end(),
+                            [&](const auto& p) { return p->address() == address; });
     }
-    typename points_t::iterator find_by_address(virt_addr address) {
-        return find_by_address_impl(*this, address);
-    }
+    typename points_t::iterator find_by_address(virt_addr address) { return find_by_address_impl(*this, address); }
     typename points_t::const_iterator find_by_address(virt_addr address) const {
         return find_by_address_impl(*this, address);
     }

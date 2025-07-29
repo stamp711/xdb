@@ -12,13 +12,8 @@ auto get_next_id() {
 
 namespace xdb {
 
-watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mode,
-                       std::size_t size)
-    : process_(&proc),
-      address_(address),
-      mode_(mode),
-      size_(size),
-      is_enabled_(false) {
+watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mode, std::size_t size)
+    : process_(&proc), address_(address), mode_(mode), size_(size), is_enabled_(false) {
     // Check address alignment
     if ((address.addr() & (size - 1)) != 0) {
         xdb::error::send("Watchpoint address must be aligned to size");
@@ -28,8 +23,7 @@ watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mode,
 
 void watchpoint::enable() {
     if (!is_enabled_) {
-        hardware_register_index_ =
-            process_->set_hardware_stoppoint(address_, mode_, size_);
+        hardware_register_index_ = process_->set_hardware_stoppoint(address_, mode_, size_);
         is_enabled_ = true;
     }
 }

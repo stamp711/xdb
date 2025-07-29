@@ -13,8 +13,7 @@ auto get_next_id() {
     return ++current_id;
 }
 
-std::byte replace_byte_in_process(xdb::process& proc, xdb::virt_addr address,
-                                  std::byte new_byte) {
+std::byte replace_byte_in_process(xdb::process& proc, xdb::virt_addr address, std::byte new_byte) {
     // return original_byte;
     auto original_byte = proc.read_memory_as<std::byte>(address);
     proc.write_memory(address, std::span(&new_byte, 1));
@@ -23,8 +22,7 @@ std::byte replace_byte_in_process(xdb::process& proc, xdb::virt_addr address,
 
 }  // namespace
 
-xdb::breakpoint_site::breakpoint_site(process& proc, virt_addr address,
-                                      bool is_hardware, bool is_internal)
+xdb::breakpoint_site::breakpoint_site(process& proc, virt_addr address, bool is_hardware, bool is_internal)
     : process_(&proc),
       address_(address),
       is_enabled_(false),
@@ -38,8 +36,8 @@ void xdb::breakpoint_site::enable() {
     if (is_enabled_) return;
 
     if (is_hardware_) {
-        hardware_register_index_ = process_->set_hardware_stoppoint(
-            address_, stoppoint_mode::execute, 1 /* must be 1 for execute */);
+        hardware_register_index_ =
+            process_->set_hardware_stoppoint(address_, stoppoint_mode::execute, 1 /* must be 1 for execute */);
     } else /* Software breakpoint */ {
         const std::byte INT3{0xCC};
         original_byte_ = replace_byte_in_process(*process_, address_, INT3);

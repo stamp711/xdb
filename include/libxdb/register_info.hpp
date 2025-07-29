@@ -24,12 +24,7 @@ enum class register_type : std::uint8_t {
     dr,       // Debug Register
 };
 
-enum class register_format : std::uint8_t {
-    uint,
-    double_float,
-    long_double,
-    vector
-};
+enum class register_format : std::uint8_t { uint, double_float, long_double, vector };
 
 struct register_info {
     register_id id;
@@ -53,8 +48,7 @@ inline constexpr register_info g_register_infos[] = {
 
 template <class F>
 [[nodiscard]] const register_info& register_info_by(F f) {
-    auto it = std::find_if(std::begin(g_register_infos),
-                           std::end(g_register_infos), f);
+    auto it = std::find_if(std::begin(g_register_infos), std::end(g_register_infos), f);
     if (it == std::end(g_register_infos)) {
         error::send("Could not find register info");
     }
@@ -62,21 +56,15 @@ template <class F>
 }
 
 [[nodiscard]] inline const register_info& register_info_by_id(register_id id) {
-    return register_info_by(
-        [id](const register_info& info) { return info.id == id; });
+    return register_info_by([id](const register_info& info) { return info.id == id; });
 }
 
-[[nodiscard]] inline const register_info& register_info_by_name(
-    std::string_view name) {
-    return register_info_by(
-        [name](const register_info& info) { return info.name == name; });
+[[nodiscard]] inline const register_info& register_info_by_name(std::string_view name) {
+    return register_info_by([name](const register_info& info) { return info.name == name; });
 }
 
-[[nodiscard]] inline const register_info& register_info_by_dwarf_id(
-    int32_t dwarf_id) {
-    return register_info_by([dwarf_id](const register_info& info) {
-        return info.dwarf_id == dwarf_id;
-    });
+[[nodiscard]] inline const register_info& register_info_by_dwarf_id(int32_t dwarf_id) {
+    return register_info_by([dwarf_id](const register_info& info) { return info.dwarf_id == dwarf_id; });
 }
 
 }  // namespace xdb
