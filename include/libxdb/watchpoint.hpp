@@ -24,6 +24,8 @@ class watchpoint {
 
     [[nodiscard]] bool is_enabled() const { return is_enabled_; }
     [[nodiscard]] virt_addr address() const { return address_; }
+    [[nodiscard]] stoppoint_mode mode() const { return mode_; }
+    [[nodiscard]] std::size_t size() const { return size_; }
 
     [[nodiscard]] bool at_address(virt_addr addr) const {
         return address_ == addr;

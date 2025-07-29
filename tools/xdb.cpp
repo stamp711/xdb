@@ -114,7 +114,8 @@ void print_help(std::span<const std::string> args) {
                   << "    disassemble, disas - Disassemble instructions\n"
                   << "    memory, mem        - Memory operations\n"
                   << "    register, reg      - Register operations\n"
-                  << "    stepi, si          - Single step an instruction\n";
+                  << "    stepi, si          - Single step an instruction\n"
+                  << "    watchpoint, w      - Manage watchpoints\n";
     } else if (args[1] == "breakpoint" || args[1] == "b") {
         std::cout
             << "Manage breakpoints.\n"
@@ -128,6 +129,32 @@ void print_help(std::span<const std::string> args) {
             << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
             << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
             << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
+    } else if (args[1] == "watchpoint" || args[1] == "w") {
+        std::cout
+            << "Manage watchpoints.\n"
+            << "Usage:\n"
+            << "    watchpoint list                       - List all "
+               "watchpoints\n"
+            << "    watchpoint set <address> <mode> <size> - Set a watchpoint\n"
+            << "    watchpoint enable <id>                - Enable a "
+               "watchpoint by ID\n"
+            << "    watchpoint disable <id>               - Disable a "
+               "watchpoint by ID\n"
+            << "    watchpoint delete <id>                - Delete a "
+               "watchpoint by ID\n"
+            << "Modes:\n"
+            << "    write                                 - Break on write "
+               "access\n"
+            << "    read_write, rw                        - Break on read or "
+               "write access\n"
+            << "    execute                               - Break on "
+               "execution\n"
+            << "Size:\n"
+            << "    1, 2, 4, 8                           - Number of bytes to "
+               "watch\n"
+            << "Examples:\n"
+            << "    watchpoint set 0x401000 write 4\n"
+            << "    watchpoint set 0x7fff12345678 read_write 8\n";
     } else if (args[1] == "continue" || args[1] == "c") {
         std::cout << "Resume the process.\n";
     } else if (args[1] == "disassemble" || args[1] == "disas") {
@@ -296,6 +323,32 @@ void print_all_breakpoints(xdb::process &process) {
     });
 }
 
+void print_all_watchpoints(xdb::process &process) {
+    if (process.watchpoints().empty()) {
+        fmt::println("No watchpoints set.");
+        return;
+    }
+    fmt::println("Watchpoints:");
+    process.watchpoints().for_each([](const auto &watchpoint) {
+        const char *mode_str = "";
+        switch (watchpoint.mode()) {
+            case xdb::stoppoint_mode::write:
+                mode_str = "write";
+                break;
+            case xdb::stoppoint_mode::read_write:
+                mode_str = "read_write";
+                break;
+            case xdb::stoppoint_mode::execute:
+                mode_str = "execute";
+                break;
+        }
+        fmt::println("{}: address = {:#x}, mode = {}, size = {}, {}",
+                     watchpoint.id(), watchpoint.address().addr(), mode_str,
+                     watchpoint.size(),
+                     watchpoint.is_enabled() ? "enabled" : "disabled");
+    });
+}
+
 void handle_breakpoint_command(xdb::process &process,
                                std::span<const std::string> args) {
     auto phelp = []() { print_help_init({"help", "breakpoint"}); };
@@ -354,6 +407,100 @@ void handle_breakpoint_command(xdb::process &process,
         process.breakpoint_sites().remove_by_id(*breakpoint_id);
     } else {
         fmt::println("Unknown breakpoint command: {}", cmd);
+        phelp();
+    }
+}
+
+void handle_watchpoint_command(xdb::process &process,
+                               std::span<const std::string> args) {
+    auto phelp = []() { print_help_init({"help", "watchpoint"}); };
+
+    if (args.size() < 2) {
+        phelp();
+        return;
+    }
+
+    auto cmd = args[1];
+    if (cmd == "list") {
+        print_all_watchpoints(process);
+        return;
+    }
+
+    if (cmd == "set") {
+        if (args.size() < 5) {
+            phelp();
+            return;
+        }
+        constexpr int hex_base = 16;
+        auto address = xdb::to_integral<std::uint64_t>(args[2], hex_base);
+        if (!address) {
+            fmt::println("Address is expected in 0xhex format");
+            return;
+        }
+
+        // Parse mode
+        xdb::stoppoint_mode mode = xdb::stoppoint_mode::execute;
+        if (args[3] == "write") {
+            mode = xdb::stoppoint_mode::write;
+        } else if (args[3] == "read_write" || args[3] == "rw") {
+            mode = xdb::stoppoint_mode::read_write;
+        } else if (args[3] == "execute") {
+            mode = xdb::stoppoint_mode::execute;
+        } else {
+            fmt::println("Invalid mode. Use 'write' or 'read_write'");
+            return;
+        }
+
+        // Parse size
+        auto size = xdb::to_integral<std::size_t>(args[4]);
+        if (!size || (*size != 1 && *size != 2 && *size != 4 && *size != 8)) {
+            fmt::println("Invalid size. Use 1, 2, 4, or 8");
+            return;
+        }
+
+        try {
+            process.create_watchpoint(xdb::virt_addr{*address}, mode, *size)
+                .enable();
+            fmt::println("Watchpoint set at {:#x}", *address);
+        } catch (const std::exception &e) {
+            fmt::println("Error setting watchpoint: {}", e.what());
+        }
+        return;
+    }
+
+    if (args.size() < 3) {
+        phelp();
+        return;
+    }
+    auto watchpoint_id = xdb::to_integral<xdb::watchpoint::id_type>(args[2]);
+    if (!watchpoint_id) {
+        fmt::println("Command expects valid watchpoint ID");
+        return;
+    }
+
+    if (cmd == "enable") {
+        try {
+            process.watchpoints().get_by_id(*watchpoint_id).enable();
+            fmt::println("Watchpoint {} enabled", *watchpoint_id);
+        } catch (const std::exception &e) {
+            fmt::println("Error: {}", e.what());
+        }
+    } else if (cmd == "disable") {
+        try {
+            process.watchpoints().get_by_id(*watchpoint_id).disable();
+            fmt::println("Watchpoint {} disabled", *watchpoint_id);
+        } catch (const std::exception &e) {
+            fmt::println("Error: {}", e.what());
+        }
+    } else if (cmd == "delete") {
+        try {
+            process.watchpoints().remove_by_id(*watchpoint_id);
+            fmt::println("Watchpoint {} deleted", *watchpoint_id);
+        } catch (const std::exception &e) {
+            fmt::println("Error: {}", e.what());
+        }
+    } else {
+        fmt::println("Unknown watchpoint command: {}", cmd);
         phelp();
     }
 }
@@ -506,6 +653,8 @@ void handle_command(std::unique_ptr<xdb::process> &process,
         print_help(args);
     } else if (command == "breakpoint" || command == "b") {
         handle_breakpoint_command(*process, args);
+    } else if (command == "watchpoint" || command == "w") {
+        handle_watchpoint_command(*process, args);
     } else if (command == "continue" || command == "c") {
         if (process->state() == xdb::process_state::stopped) {
             process->resume();
