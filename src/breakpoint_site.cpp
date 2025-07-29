@@ -38,7 +38,8 @@ void xdb::breakpoint_site::enable() {
     if (is_enabled_) return;
 
     if (is_hardware_) {
-        hardware_register_index_ = process_->set_hardware_breakpoint(address_);
+        hardware_register_index_ = process_->set_hardware_stoppoint(
+            address_, stoppoint_mode::execute, 1 /* must be 1 for execute */);
     } else /* Software breakpoint */ {
         const std::byte INT3{0xCC};
         original_byte_ = replace_byte_in_process(*process_, address_, INT3);
@@ -51,7 +52,7 @@ void xdb::breakpoint_site::disable() {
     if (!is_enabled_) return;
 
     if (is_hardware_) {
-        process_->clear_hardware_breakpoint(hardware_register_index_);
+        process_->clear_hardware_stoppoint(hardware_register_index_);
     } else /* Software breakpoint */ {
         replace_byte_in_process(*process_, address_, original_byte_);
     }

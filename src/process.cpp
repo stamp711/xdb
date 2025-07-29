@@ -13,6 +13,7 @@
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
 #include <libxdb/types.hpp>
+#include <libxdb/watchpoint.hpp>
 #include <memory>
 #include <string>
 
@@ -27,7 +28,7 @@ int find_free_stoppoint_register(std::uint64_t control) {
             return i;
         }
     }
-    xdb::error::send("No free stoppoint register");
+    xdb::error::send("No free stoppoint register available");
 }
 
 std::uint64_t encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) {
@@ -404,19 +405,16 @@ xdb::breakpoint_site &xdb::process::create_breakpoint_site(virt_addr address,
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
-int xdb::process::set_hardware_breakpoint(virt_addr addr) {
-    constexpr auto size = 1;  // must be 1 for execute
-    return set_hardware_stoppoint(addr, stoppoint_mode::execute, size);
-}
-
-void xdb::process::clear_hardware_breakpoint(int hw_breakpoint_index) {
-    auto &regs = get_registers();
-    auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
-
-    // Clear the stoppoint
-    std::uint64_t clear_mask = (0b11ULL << (2 * hw_breakpoint_index));
-    control &= ~clear_mask;
-    regs.write_by_id(register_id::dr7, control);
+xdb::watchpoint &xdb::process::create_watchpoint(virt_addr addr,
+                                                 stoppoint_mode mode,
+                                                 std::size_t size) {
+    if (watchpoints_.contains_address(addr)) {
+        error::send("Watchpoint already exists at address " +
+                    std::to_string(addr.addr()));
+    }
+    auto wp =
+        std::unique_ptr<watchpoint>(new watchpoint(*this, addr, mode, size));
+    return watchpoints_.push(std::move(wp));
 }
 
 int xdb::process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
@@ -455,4 +453,14 @@ int xdb::process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
     regs.write_by_id(register_id::dr7, control);
 
     return 0;
+}
+
+void xdb::process::clear_hardware_stoppoint(int hw_stoppoint_index) {
+    auto &regs = get_registers();
+    auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
+
+    // Clear the stoppoint
+    std::uint64_t clear_mask = (0b11ULL << (2 * hw_stoppoint_index));
+    control &= ~clear_mask;
+    regs.write_by_id(register_id::dr7, control);
 }

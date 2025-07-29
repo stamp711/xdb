@@ -9,6 +9,7 @@
 #include <libxdb/registers.hpp>
 #include <libxdb/stoppoint_collection.hpp>
 #include <libxdb/types.hpp>
+#include <libxdb/watchpoint.hpp>
 #include <memory>
 #include <span>
 
@@ -89,9 +90,15 @@ class process {
         return breakpoint_sites_;
     }
 
-    // -- hardware breakpoint --
-    int set_hardware_breakpoint(virt_addr addr);
-    void clear_hardware_breakpoint(int hw_breakpoint_index);
+    // -- watchpoint sites --
+    watchpoint &create_watchpoint(virt_addr addr, stoppoint_mode mode,
+                                  std::size_t size);
+    [[nodiscard]] stoppoint_collection<watchpoint> &watchpoints() {
+        return watchpoints_;
+    }
+    [[nodiscard]] const stoppoint_collection<watchpoint> &watchpoints() const {
+        return watchpoints_;
+    }
 
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
@@ -102,8 +109,11 @@ class process {
 
     void read_all_registers();
 
+    // -- for friend classes - TODO: finer access control --
+    friend class breakpoint_site, watchpoint;
     int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode,
                                std::size_t size);
+    void clear_hardware_stoppoint(int hw_stoppoint_index);
 
     pid_t pid_ = 0;
     bool terminate_on_destruction_ = true;
@@ -112,6 +122,7 @@ class process {
     std::unique_ptr<registers> registers_;
 
     stoppoint_collection<breakpoint_site> breakpoint_sites_;
+    stoppoint_collection<watchpoint> watchpoints_;
 };
 
 }  // namespace xdb
