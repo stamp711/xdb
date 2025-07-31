@@ -10,6 +10,7 @@ void print_help(std::span<const std::string> args) {
         std::cout << "Available commands:\n"
                   << "    help, h            - Show this help message\n"
                   << "    breakpoint, b      - Manage breakpoints\n"
+                  << "    catchpoint, catch  - Manage catchpoints (syscalls)\n"
                   << "    continue, c        - Resume the process\n"
                   << "    disassemble, disas - Disassemble instructions\n"
                   << "    memory, mem        - Memory operations\n"
@@ -26,6 +27,21 @@ void print_help(std::span<const std::string> args) {
                   << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
                   << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
                   << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
+    } else if (args[1] == "catchpoint" || args[1] == "catch") {
+        std::cout << "Manage catchpoints for syscalls.\n"
+                  << "Usage:\n"
+                  << "    catchpoint syscall                    - Catch all syscalls\n"
+                  << "    catchpoint sys none                   - Stop catching syscalls\n"
+                  << "    catchpoint sys <name>                 - Catch specific syscall by name\n"
+                  << "    catchpoint syscall <number>           - Catch specific syscall by number\n"
+                  << "    catchpoint sys <name1>,<name2>,...    - Catch multiple syscalls\n"
+                  << "Examples:\n"
+                  << "    catch syscall                         - Catch all syscalls\n"
+                  << "    catch sys none                        - Stop catching syscalls\n"
+                  << "    catch sys write                       - Catch write syscall\n"
+                  << "    catch syscall 1                       - Catch syscall number 1\n"
+                  << "    catch sys write,read,openat           - Catch multiple syscalls\n"
+                  << "    catch sys 0,ptrace                    - Catch syscalls 0 and ptrace\n";
     } else if (args[1] == "watchpoint" || args[1] == "w") {
         std::cout << "Manage watchpoints.\n"
                   << "Usage:\n"

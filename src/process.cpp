@@ -79,6 +79,15 @@ std::uint64_t encode_hardware_stoppoint_size(std::size_t size) {
     }
 }
 
+void set_ptrace_options(pid_t pid) {
+    // PTRACE_O_TRACESYSGOOD: When delivering system call traps, set bit 7 in the signal number (i.e., deliver
+    // SIGTRAP|0x80). This makes it easy for the tracer to distinguish normal traps from those caused by a system call.
+    // (PTRACE_O_TRACESYSGOOD may not work on all architectures.)
+    if (ptrace(PTRACE_SETOPTIONS, pid, nullptr, PTRACE_O_TRACESYSGOOD) == -1) {
+        xdb::error::send_errno("PTRACE_SETOPTIONS failed");
+    }
+}
+
 }  // namespace
 
 namespace xdb {
@@ -95,6 +104,7 @@ std::unique_ptr<process> process::attach(pid_t pid) {
 
     std::unique_ptr<process> proc(new process(pid, false, true));
     proc->wait_on_signal();
+    set_ptrace_options(pid);
 
     return proc;
 }
@@ -138,7 +148,7 @@ std::unique_ptr<process> process::launch(const std::filesystem::path &path, bool
             exit_with_perror(p, "PTRACE_TRACEME failed");
         }
 
-        execlp(path.c_str(), path.c_str(), nullptr);
+        execlp(path.c_str(), path.c_str(), nullptr);  // This will generate a SIGTRAP
         exit_with_perror(p, "Exec failed");
     }
 
@@ -155,7 +165,10 @@ std::unique_ptr<process> process::launch(const std::filesystem::path &path, bool
 
     // Child process exec succeeded
     std::unique_ptr<process> proc(new process(pid, true, debug));
-    if (debug) proc->wait_on_signal();
+    if (debug) {
+        proc->wait_on_signal();
+        set_ptrace_options(proc->pid());
+    }
     return proc;
 }
 
@@ -199,8 +212,10 @@ void process::resume() {
         bp.enable();  // Re-enable the breakpoint
     }
 
-    if (ptrace(PTRACE_CONT, pid_, nullptr, nullptr) == -1) {
-        error::send_errno("PTRACE_CONT failed");
+    // Determine the request based on the syscall catch policy
+    auto request = syscall_catch_policy_.catches_none() ? PTRACE_CONT : PTRACE_SYSCALL;
+    if (ptrace(request, pid_, nullptr, nullptr) == -1) {
+        error::send_errno("Could not resume process");
     }
     state_ = process_state::running;
 }
@@ -231,6 +246,14 @@ stop_reason process::wait_on_signal() {
                 auto id = get_current_hardware_stoppoint();
                 if (id.index() == 1) {  // Watchpoint hit, record watchpoint data change
                     watchpoints_.get_by_id(std::get<1>(id)).record_data_change();
+                }
+            } else if (reason.trap_reason == trap_type::syscall) {
+                // Skip this signal if syscall id needs not to be caught
+                // TODO: refactor to remove recursion and don't rely on TCO
+                auto needs_catch = syscall_catch_policy_.catches_syscall_id(reason.syscall_info->id);
+                if (!needs_catch) {
+                    resume();
+                    return wait_on_signal();
                 }
             }
         }
@@ -495,13 +518,12 @@ void process::clear_hardware_stoppoint(int hw_stoppoint_index) {
     regs.write_by_id(register_id::dr7, control);
 }
 
-void process::augment_stop_reason(stop_reason &reason) const {
+void process::augment_stop_reason(stop_reason &reason) {
     siginfo_t info;
     if (ptrace(PTRACE_GETSIGINFO, pid(), nullptr, &info) == -1) {
         error::send_errno("PTRACE_GETSIGINFO failed");
     }
 
-    reason.trap_reason = trap_type::unknown;
     if (reason.info == SIGTRAP) {
         switch (info.si_code) {
             case TRAP_TRACE:
@@ -517,6 +539,38 @@ void process::augment_stop_reason(stop_reason &reason) const {
                 reason.trap_reason = trap_type::unknown;
                 break;
         }
+
+    } else if (reason.info == (SIGTRAP | 0x80)) {
+        reason.info = SIGTRAP;  // Remove the 0x80
+        reason.trap_reason = trap_type::syscall;
+
+        // Fill in syscall info
+        auto &syscall_info = reason.syscall_info.emplace();
+        const auto &regs = get_registers();
+
+        if (expecting_syscall_exit_) {
+            // Syscall exit
+            syscall_info.id = regs.read_by_id_as<std::uint64_t>(register_id::orig_rax);
+            syscall_info.is_entry = false;
+            syscall_info.ret = regs.read_by_id_as<std::uint64_t>(register_id::rax);
+
+            expecting_syscall_exit_ = false;
+        } else {
+            // Syscall entry
+            syscall_info.id = regs.read_by_id_as<std::uint64_t>(register_id::orig_rax);
+            syscall_info.is_entry = true;
+            syscall_info.args = {regs.read_by_id_as<std::uint64_t>(register_id::rdi),
+                                 regs.read_by_id_as<std::uint64_t>(register_id::rsi),
+                                 regs.read_by_id_as<std::uint64_t>(register_id::rdx),
+                                 regs.read_by_id_as<std::uint64_t>(register_id::r10),
+                                 regs.read_by_id_as<std::uint64_t>(register_id::r8),
+                                 regs.read_by_id_as<std::uint64_t>(register_id::r9)};
+
+            expecting_syscall_exit_ = true;
+        }
+
+    } else {
+        reason.trap_reason = trap_type::unknown;
     }
 }
 

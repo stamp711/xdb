@@ -17,6 +17,7 @@
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
 #include <libxdb/registers.hpp>
+#include <libxdb/syscalls.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
 #include <span>
@@ -75,8 +76,77 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
     return tokens;
 }
 
+std::string format_syscall_trap_info(const xdb::syscall_information &syscall) {
+    if (syscall.is_entry) {
+        return " (syscall entry)";
+    }
+    return " (syscall exit)";
+}
+
+void print_syscall_details(const xdb::syscall_information &syscall) {
+    auto syscall_name = xdb::syscall_id_to_name(syscall.id);
+
+    if (syscall.is_entry) {
+        if (syscall.args.has_value()) {
+            const auto &args = syscall.args.value();
+            fmt::println("syscall entry: {}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})", syscall_name, args[0], args[1],
+                         args[2], args[3], args[4], args[5]);
+        } else {
+            fmt::println("syscall entry: {}(...)", syscall_name);
+        }
+    } else {
+        if (syscall.ret.has_value()) {
+            fmt::println("syscall exit: {}(...) = {:#x}", syscall_name, syscall.ret.value());
+        } else {
+            fmt::println("syscall exit: {}(...)", syscall_name);
+        }
+    }
+}
+
 std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason &reason) {
     std::string message;
+
+    if (!reason.trap_reason.has_value()) {
+        return message;
+    }
+    switch (reason.trap_reason.value()) {
+        case xdb::trap_type::software_breakpoint: {
+            const auto &bp = process.breakpoint_sites().get_by_address(process.get_pc());
+            message = fmt::format(" (breakpoint {})", bp.id());
+        } break;
+
+        case xdb::trap_type::single_step: {
+            message = " (single step)";
+        } break;
+
+        case xdb::trap_type::hardware_stoppoint: {
+            auto id = process.get_current_hardware_stoppoint();
+            if (id.index() == 0) {  // Hardware breakpoint
+                message = fmt::format(" (breakpoint {})", std::get<0>(id));
+            } else if (id.index() == 1) {  // Hardware watchpoint
+                const auto watchpoint_id = std::get<1>(id);
+                message = fmt::format(" (watchpoint {})", watchpoint_id);
+                const auto &wp = process.watchpoints().get_by_id(watchpoint_id);
+                if (wp.data() == wp.previous_data()) {
+                    message += fmt::format("\n Value: {:#x}", wp.data());
+                } else {
+                    message += fmt::format("\n Previous Value: {:#x}", wp.previous_data());
+                    message += fmt::format("\n Current Value: {:#x}", wp.data());
+                }
+            }
+        } break;
+
+        case xdb::trap_type::syscall: {
+            if (reason.syscall_info.has_value()) {
+                message = format_syscall_trap_info(reason.syscall_info.value());
+            } else {
+                message = " (syscall)";
+            }
+        } break;
+
+        case xdb::trap_type::unknown: {
+        } break;
+    }
 
     if (reason.trap_reason == xdb::trap_type::software_breakpoint) {
         const auto &bp = process.breakpoint_sites().get_by_address(process.get_pc());
@@ -130,6 +200,12 @@ void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reas
             message = "state is unknown";
     }
     fmt::println("Process {} {}", process.pid(), message);
+
+    // Print additional syscall details if this is a syscall trap
+    if (reason.state == xdb::process_state::stopped && reason.info == SIGTRAP &&
+        reason.trap_reason == xdb::trap_type::syscall && reason.syscall_info.has_value()) {
+        print_syscall_details(reason.syscall_info.value());
+    }
 }
 
 void handle_stop(xdb::process &process, xdb::stop_reason reason) {
@@ -148,6 +224,8 @@ void handle_command(std::unique_ptr<xdb::process> &process, std::string_view lin
         xdb_handlers::print_help(args);
     } else if (command == "breakpoint" || command == "b") {
         xdb_handlers::handle_breakpoint_command(*process, args);
+    } else if (command == "catchpoint" || command == "catch") {
+        xdb_handlers::handle_catchpoint_command(*process, args);
     } else if (command == "watchpoint" || command == "w") {
         xdb_handlers::handle_watchpoint_command(*process, args);
     } else if (command == "continue" || command == "c") {

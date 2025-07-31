@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <fcntl.h>
 #include <fmt/base.h>
 #include <sys/signal.h>
 
@@ -13,6 +14,7 @@
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
+#include <libxdb/syscalls.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
 #include <regex>
@@ -512,4 +514,40 @@ TEST_CASE("Watchpoint detects read", "[watchpoint]") {
     proc->resume();
     proc->wait_on_signal();
     REQUIRE(to_string_view(channel.read()) == "Putting pineapple on pizza...\n");
+}
+
+TEST_CASE("Syscall id & name mapping", "[syscall]") {
+    REQUIRE(xdb::syscall_id_to_name(0) == "read");
+    REQUIRE(xdb::syscall_name_to_id("read") == 0);
+    REQUIRE(xdb::syscall_id_to_name(16) == "ioctl");
+    REQUIRE(xdb::syscall_name_to_id("ioctl") == 16);
+}
+
+TEST_CASE("Syscall catchpoints", "[catchpoint]") {
+    auto dev_null = open("/dev/null", O_WRONLY);
+    auto proc = xdb::process::launch(test_path() / "targets/anti_debugger", true, dev_null);
+
+    auto write_syscall = xdb::syscall_name_to_id("write");
+    auto policy = xdb::syscall_catch_policy::catch_some({write_syscall});
+    proc->set_syscall_catch_policy(policy);
+
+    proc->resume();
+    auto reason = proc->wait_on_signal();
+
+    REQUIRE(reason.state == xdb::process_state::stopped);
+    REQUIRE(reason.info == SIGTRAP);
+    REQUIRE(reason.trap_reason == xdb::trap_type::syscall);
+    REQUIRE(reason.syscall_info->id == write_syscall);
+    REQUIRE(reason.syscall_info->is_entry == true);
+
+    proc->resume();
+    reason = proc->wait_on_signal();
+
+    REQUIRE(reason.state == xdb::process_state::stopped);
+    REQUIRE(reason.info == SIGTRAP);
+    REQUIRE(reason.trap_reason == xdb::trap_type::syscall);
+    REQUIRE(reason.syscall_info->id == write_syscall);
+    REQUIRE(reason.syscall_info->is_entry == false);
+
+    close(dev_null);
 }

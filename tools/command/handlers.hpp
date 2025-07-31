@@ -26,4 +26,7 @@ void handle_memory_command(xdb::process &process, std::span<const std::string> a
 void handle_disassemble_command(xdb::process &process, std::span<const std::string> args);
 void print_disassembly(xdb::process &process, xdb::virt_addr address, std::size_t n_instructions);
 
+// Catchpoint command handlers
+void handle_catchpoint_command(xdb::process &process, std::span<const std::string> args);
+
 }  // namespace xdb_handlers
