@@ -27,8 +27,13 @@ class watchpoint {
     [[nodiscard]] stoppoint_mode mode() const { return mode_; }
     [[nodiscard]] std::size_t size() const { return size_; }
 
+    [[nodiscard]] std::uint64_t data() const { return data_; }
+    [[nodiscard]] std::uint64_t previous_data() const { return previous_data_; }
+
     [[nodiscard]] bool at_address(virt_addr addr) const { return address_ == addr; }
     [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const { return address_ >= low && address_ < high; }
+
+    void record_data_change();
 
    private:
     friend process;
@@ -42,6 +47,8 @@ class watchpoint {
     bool is_enabled_;
 
     int hardware_register_index_ = -1;
+    std::uint64_t data_ = 0;
+    std::uint64_t previous_data_ = 0;
 };
 
 }  // namespace xdb

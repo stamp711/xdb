@@ -18,7 +18,8 @@ void print_all_breakpoints(xdb::process &process) {
         if (breakpoint_site.is_internal()) {
             return;  // Skip internal breakpoints
         }
-        fmt::println("{}: address = {:#x}, {}", breakpoint_site.id(), breakpoint_site.address().addr(),
+        fmt::println("{}: address = {:#x}, {}, {}", breakpoint_site.id(), breakpoint_site.address().addr(),
+                     breakpoint_site.is_hardware() ? "hardware" : "software",
                      breakpoint_site.is_enabled() ? "enabled" : "disabled");
     });
 }

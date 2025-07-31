@@ -1,3 +1,4 @@
+#include <cstring>
 #include <libxdb/process.hpp>
 #include <libxdb/watchpoint.hpp>
 
@@ -19,6 +20,7 @@ watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mode, st
         xdb::error::send("Watchpoint address must be aligned to size");
     }
     id_ = get_next_id();
+    record_data_change();
 }
 
 void watchpoint::enable() {
@@ -33,6 +35,14 @@ void watchpoint::disable() {
         process_->clear_hardware_stoppoint(hardware_register_index_);
         is_enabled_ = false;
     }
+}
+
+void watchpoint::record_data_change() {
+    std::uint64_t new_data = 0;
+    auto read = process_->read_memory(address_, size_);
+    std::memcpy(&new_data, read.data(), size_);
+    previous_data_ = data_;
+    data_ = new_data;
 }
 
 }  // namespace xdb

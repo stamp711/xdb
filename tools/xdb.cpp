@@ -28,6 +28,19 @@
 
 namespace {
 
+const xdb::process *&get_xdb_process() {
+    static const xdb::process *g_xdb_process = nullptr;
+    return g_xdb_process;
+}
+
+void handle_signal(int signum) {
+    if (signum == SIGINT) {
+        if (get_xdb_process() != nullptr) {
+            ::kill(get_xdb_process()->pid(), SIGSTOP);
+        }
+    }
+}
+
 std::unique_ptr<xdb::process> attach(std::span<const char *const> args) {
     if (args.size() < 2) {
         std::cerr << "Usage: xdb [-p PID] [program_path]\n";
@@ -62,6 +75,36 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
     return tokens;
 }
 
+std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason &reason) {
+    std::string message;
+
+    if (reason.trap_reason == xdb::trap_type::software_breakpoint) {
+        const auto &bp = process.breakpoint_sites().get_by_address(process.get_pc());
+        message = fmt::format(" (breakpoint {})", bp.id());
+
+    } else if (reason.trap_reason == xdb::trap_type::single_step) {
+        message = " (single step)";
+
+    } else if (reason.trap_reason == xdb::trap_type::hardware_stoppoint) {
+        auto id = process.get_current_hardware_stoppoint();
+        if (id.index() == 0) {  // Hardware breakpoint
+            message = fmt::format(" (breakpoint {})", std::get<0>(id));
+        } else if (id.index() == 1) {  // Hardware watchpoint
+            const auto watchpoint_id = std::get<1>(id);
+            message = fmt::format(" (watchpoint {})", watchpoint_id);
+            const auto &wp = process.watchpoints().get_by_id(watchpoint_id);
+            if (wp.data() == wp.previous_data()) {
+                message += fmt::format("\n Value: {:#x}", wp.data());
+            } else {
+                message += fmt::format("\n Previous Value: {:#x}", wp.previous_data());
+                message += fmt::format("\n Current Value: {:#x}", wp.data());
+            }
+        }
+    }
+
+    return message;
+}
+
 void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reason) {
     std::string message;
     const char *sig = nullptr;
@@ -72,6 +115,9 @@ void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reas
         case xdb::process_state::stopped:
             sig = sigabbrev_np(reason.info);
             message = fmt::format("stopped by signal {} at {:#x}", sig, process.get_pc().addr());
+            if (reason.info == SIGTRAP) {
+                message += get_sigtrap_info(process, reason);
+            }
             break;
         case xdb::process_state::exited:
             message = fmt::format("exited with status {}", reason.info);
@@ -128,8 +174,6 @@ void handle_command(std::unique_ptr<xdb::process> &process, std::string_view lin
     }
 }
 
-}  // namespace
-
 int run(std::span<const char *const> args) {
     if (args.size() < 2) {
         std::cerr << "No arguments given\n";
@@ -137,6 +181,11 @@ int run(std::span<const char *const> args) {
     }
 
     auto process = attach(args);
+
+    // Register signal handler
+    get_xdb_process() = process.get();
+    signal(SIGINT, handle_signal);
+
     std::cout << "Attached to process with PID: " << process->pid() << '\n';
 
     // REPL
@@ -162,6 +211,8 @@ int run(std::span<const char *const> args) {
 
     return 0;
 }
+
+}  // namespace
 
 int main(int argc, const char *argv[]) {
     try {

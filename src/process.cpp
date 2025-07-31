@@ -3,7 +3,9 @@
 #include <sys/ptrace.h>
 #include <sys/uio.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -16,6 +18,7 @@
 #include <libxdb/watchpoint.hpp>
 #include <memory>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -39,6 +42,19 @@ std::uint64_t encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) {
             return 0b01;
         case xdb::stoppoint_mode::read_write:
             return 0b11;
+        default:
+            xdb::error::send("Invalid stoppoint mode");
+    }
+}
+
+xdb::stoppoint_mode decode_hardware_stoppoint_mode(std::uint64_t mode) {
+    switch (mode) {
+        case 0b00:
+            return xdb::stoppoint_mode::execute;
+        case 0b01:
+            return xdb::stoppoint_mode::write;
+        case 0b11:
+            return xdb::stoppoint_mode::read_write;
         default:
             xdb::error::send("Invalid stoppoint mode");
     }
@@ -103,7 +119,13 @@ std::unique_ptr<process> process::launch(const std::filesystem::path &path, bool
         // Child process
         p.close_read();
 
-        ::personality(ADDR_NO_RANDOMIZE);  // Disable ASLR
+        // Set process group ID to its own
+        if (::setpgid(0, 0) == -1) {
+            exit_with_perror(p, "setpgid failed");
+        }
+
+        // Disable ASLR
+        ::personality(ADDR_NO_RANDOMIZE);
 
         if (stdout_replacement) {
             // Redirect stdout to the specified file descriptor
@@ -196,13 +218,21 @@ stop_reason process::wait_on_signal() {
     // If the process is stopped, read all registers
     if (is_attached_ && state_ == process_state::stopped) {
         read_all_registers();
+        augment_stop_reason(reason);
 
-        // If stop caused by a xdb breakpoint, revert pc to breakpoint address
-        // NOTE: if the breakpoint is not created by xdb, pc will remain to be
-        // the next instruction
-        auto prev = get_pc() - 1;
-        if (reason.info == SIGTRAP && breakpoint_sites_.enabled_stoppoint_address(prev)) {
-            set_pc(prev);
+        // If stop caused by a software breakpoint, revert pc to breakpoint address
+        // NOTE: if the breakpoint is not created by xdb, pc will remain to be the next instruction
+        auto prev_pc = get_pc() - 1;
+        if (reason.info == SIGTRAP) {
+            if (reason.trap_reason == trap_type::software_breakpoint &&
+                breakpoint_sites_.enabled_stoppoint_address(prev_pc)) {
+                set_pc(prev_pc);
+            } else if (reason.trap_reason == trap_type::hardware_stoppoint) {
+                auto id = get_current_hardware_stoppoint();
+                if (id.index() == 1) {  // Watchpoint hit, record watchpoint data change
+                    watchpoints_.get_by_id(std::get<1>(id)).record_data_change();
+                }
+            }
         }
     }
 
@@ -397,6 +427,31 @@ watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std:
     return watchpoints_.push(std::move(wp));
 }
 
+constexpr auto DR7_MODE_BITS_OFFSET = 16;
+
+std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current_hardware_stoppoint() const {
+    const auto &regs = get_registers();
+
+    // Get index of the hit hardware stoppoint from DR6
+    auto dr6_value = regs.read_by_id_as<std::uint64_t>(register_id::dr6);
+    auto index = std::countr_zero(dr6_value);  // Bit 0-3 encodes the hit hardware stoppoint
+
+    // Get watchpoint address from DR register
+    auto dr_id = static_cast<register_id>(static_cast<int>(register_id::dr0) + index);
+    auto addr = virt_addr(regs.read_by_id_as<std::uint64_t>(dr_id));
+
+    // Get watchpoint mode from DR7
+    auto dr7_value = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
+    auto mode_bits = (dr7_value >> (DR7_MODE_BITS_OFFSET + 4 * index)) & 0b11;
+    auto mode = decode_hardware_stoppoint_mode(mode_bits);
+
+    using ret_type = std::variant<breakpoint_site::id_type, watchpoint::id_type>;
+    if (mode == stoppoint_mode::execute) {
+        return ret_type{std::in_place_index<0>, breakpoint_sites_.get_by_address(addr).id()};
+    }
+    return ret_type{std::in_place_index<1>, watchpoints_.get_by_address(addr).id()};
+}
+
 int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
@@ -409,7 +464,6 @@ int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::si
     auto dr_id = static_cast<register_id>(static_cast<int>(register_id::dr0) + slot);
 
     // Calculate the control bits locations for the stoppoint
-    constexpr auto DR7_MODE_BITS_OFFSET = 16;
     auto enable_bits_location = 2 * slot;
     auto mode_bits_location = DR7_MODE_BITS_OFFSET + (4 * slot);
     auto size_bits_location = mode_bits_location + 2;
@@ -439,6 +493,31 @@ void process::clear_hardware_stoppoint(int hw_stoppoint_index) {
     std::uint64_t clear_mask = (0b11ULL << (2 * hw_stoppoint_index));
     control &= ~clear_mask;
     regs.write_by_id(register_id::dr7, control);
+}
+
+void process::augment_stop_reason(stop_reason &reason) const {
+    siginfo_t info;
+    if (ptrace(PTRACE_GETSIGINFO, pid(), nullptr, &info) == -1) {
+        error::send_errno("PTRACE_GETSIGINFO failed");
+    }
+
+    reason.trap_reason = trap_type::unknown;
+    if (reason.info == SIGTRAP) {
+        switch (info.si_code) {
+            case TRAP_TRACE:
+                reason.trap_reason = trap_type::single_step;
+                break;
+            case SI_KERNEL:  // x86_64 reports SI_KERNEL for software breakpoints, not TRAP_BRKPT
+                reason.trap_reason = trap_type::software_breakpoint;
+                break;
+            case TRAP_HWBKPT:
+                reason.trap_reason = trap_type::hardware_stoppoint;
+                break;
+            default:
+                reason.trap_reason = trap_type::unknown;
+                break;
+        }
+    }
 }
 
 }  // namespace xdb

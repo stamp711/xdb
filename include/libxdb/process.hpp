@@ -11,16 +11,21 @@
 #include <libxdb/types.hpp>
 #include <libxdb/watchpoint.hpp>
 #include <memory>
+#include <optional>
 #include <span>
+#include <variant>
 
 namespace xdb {
 
 enum class process_state : std::uint8_t { running, stopped, exited, terminated };
 
+enum class trap_type : std::uint8_t { unknown, single_step, software_breakpoint, hardware_stoppoint };
+
 struct stop_reason {
     stop_reason(int wait_status);
     process_state state;
     std::uint8_t info;
+    std::optional<trap_type> trap_reason;
 };
 
 class process {
@@ -77,6 +82,8 @@ class process {
     [[nodiscard]] stoppoint_collection<watchpoint> &watchpoints() { return watchpoints_; }
     [[nodiscard]] const stoppoint_collection<watchpoint> &watchpoints() const { return watchpoints_; }
 
+    [[nodiscard]] std::variant<breakpoint_site::id_type, watchpoint::id_type> get_current_hardware_stoppoint() const;
+
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
         : pid_(pid),
@@ -90,6 +97,9 @@ class process {
     friend class breakpoint_site, watchpoint;
     int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
     void clear_hardware_stoppoint(int hw_stoppoint_index);
+
+    // Adds SIGTRAP reason to stop_reason
+    void augment_stop_reason(stop_reason &reason) const;
 
     pid_t pid_ = 0;
     bool terminate_on_destruction_ = true;
