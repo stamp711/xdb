@@ -134,15 +134,15 @@ class process {
           is_attached_(is_attached),
           registers_(new registers(this)) {}
 
-    void read_all_registers();
+    void read_all_registers_();
 
     // -- for friend classes - TODO: finer access control --
     friend class breakpoint_site, watchpoint;
-    int set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
-    void clear_hardware_stoppoint(int hw_stoppoint_index);
+    int set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::size_t size);
+    void clear_hardware_stoppoint_(int hw_stoppoint_index);
 
     // Populate optional fields related to SIGTRAP reason to stop_reason
-    void augment_stop_reason(stop_reason &reason);
+    void augment_stop_reason_(stop_reason &reason);
 
     pid_t pid_;
     bool terminate_on_destruction_;

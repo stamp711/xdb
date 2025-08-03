@@ -232,8 +232,8 @@ stop_reason process::wait_on_signal() {
 
     // If the process is stopped, read all registers
     if (is_attached_ && state_ == process_state::stopped) {
-        read_all_registers();
-        augment_stop_reason(reason);
+        read_all_registers_();
+        augment_stop_reason_(reason);
 
         // If stop caused by a software breakpoint, revert pc to breakpoint address
         // NOTE: if the breakpoint is not created by xdb, pc will remain to be the next instruction
@@ -305,7 +305,7 @@ stop_reason::stop_reason(int wait_status) {
     }
 }
 
-void process::read_all_registers() {
+void process::read_all_registers_() {
     // Read general-purpose registers
     if (ptrace(PTRACE_GETREGS, pid_, nullptr, &get_registers().data_.regs) == -1) {
         error::send_errno("PTRACE_GETREGS failed");
@@ -475,7 +475,7 @@ std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current
     return ret_type{std::in_place_index<1>, watchpoints_.get_by_address(addr).id()};
 }
 
-int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
+int process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::size_t size) {
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
 
@@ -508,7 +508,7 @@ int process::set_hardware_stoppoint(virt_addr addr, stoppoint_mode mode, std::si
     return 0;
 }
 
-void process::clear_hardware_stoppoint(int hw_stoppoint_index) {
+void process::clear_hardware_stoppoint_(int hw_stoppoint_index) {
     auto &regs = get_registers();
     auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
 
@@ -518,7 +518,7 @@ void process::clear_hardware_stoppoint(int hw_stoppoint_index) {
     regs.write_by_id(register_id::dr7, control);
 }
 
-void process::augment_stop_reason(stop_reason &reason) {
+void process::augment_stop_reason_(stop_reason &reason) {
     siginfo_t info;
     if (ptrace(PTRACE_GETSIGINFO, pid(), nullptr, &info) == -1) {
         error::send_errno("PTRACE_GETSIGINFO failed");

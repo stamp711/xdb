@@ -25,14 +25,14 @@ watchpoint::watchpoint(process& proc, virt_addr address, stoppoint_mode mode, st
 
 void watchpoint::enable() {
     if (!is_enabled_) {
-        hardware_register_index_ = process_->set_hardware_stoppoint(address_, mode_, size_);
+        hardware_register_index_ = process_->set_hardware_stoppoint_(address_, mode_, size_);
         is_enabled_ = true;
     }
 }
 
 void watchpoint::disable() {
     if (is_enabled_) {
-        process_->clear_hardware_stoppoint(hardware_register_index_);
+        process_->clear_hardware_stoppoint_(hardware_register_index_);
         is_enabled_ = false;
     }
 }
