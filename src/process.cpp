@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <fstream>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
@@ -473,6 +474,29 @@ std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current
         return ret_type{std::in_place_index<0>, breakpoint_sites_.get_by_address(addr).id()};
     }
     return ret_type{std::in_place_index<1>, watchpoints_.get_by_address(addr).id()};
+}
+
+std::unordered_map<std::uint64_t, std::uint64_t> process::get_auxv() const {
+    auto path = "/proc/" + std::to_string(pid_) + "/auxv";
+    std::ifstream auxv_file(path, std::ios::binary);
+    if (!auxv_file.is_open()) {
+        error::send("Failed to open auxv file");
+    }
+
+    std::unordered_map<std::uint64_t, std::uint64_t> auxv_map;
+
+    std::uint64_t type = 0;
+    std::uint64_t value = 0;
+
+    while (auxv_file.read(reinterpret_cast<char *>(&type), sizeof(type)) &&
+           auxv_file.read(reinterpret_cast<char *>(&value), sizeof(value))) {
+        if (type == 0) {  // AT_NULL marks the end of the auxv
+            break;
+        }
+        auxv_map[type] = value;
+    }
+
+    return auxv_map;
 }
 
 int process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::size_t size) {

@@ -14,6 +14,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <unordered_map>
 #include <unordered_set>
 #include <variant>
 #include <vector>
@@ -126,6 +127,8 @@ class process {
     [[nodiscard]] std::variant<breakpoint_site::id_type, watchpoint::id_type> get_current_hardware_stoppoint() const;
 
     void set_syscall_catch_policy(syscall_catch_policy policy) { syscall_catch_policy_ = std::move(policy); }
+
+    [[nodiscard]] std::unordered_map<std::uint64_t, std::uint64_t> get_auxv() const;
 
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
