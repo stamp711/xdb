@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <fstream>
 #include <libxdb/bit.hpp>
+#include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
@@ -550,4 +551,58 @@ TEST_CASE("Syscall catchpoints", "[catchpoint]") {
     REQUIRE(reason.syscall_info->is_entry == false);
 
     close(dev_null);
+}
+
+TEST_CASE("ELF parser works", "[elf]") {
+    auto hello_path = test_path() / "targets/hello";
+
+    // Create ELF parser instance
+    xdb::elf elf(hello_path);
+
+    // Test basic properties
+    REQUIRE(elf.path() == hello_path);
+
+    // Test ELF header is valid
+    const auto& header = elf.header();
+    REQUIRE(header.e_ident[EI_MAG0] == ELFMAG0);
+    REQUIRE(header.e_ident[EI_MAG1] == ELFMAG1);
+    REQUIRE(header.e_ident[EI_MAG2] == ELFMAG2);
+    REQUIRE(header.e_ident[EI_MAG3] == ELFMAG3);
+    REQUIRE(header.e_ident[EI_CLASS] == ELFCLASS64);
+    REQUIRE(header.e_type == ET_DYN);  // PIE executable
+    REQUIRE(header.e_machine == EM_X86_64);
+
+    // Test that we can find common sections
+    REQUIRE(elf.get_section_header(".text") != nullptr);
+    REQUIRE(elf.get_section_header(".text")->sh_type == SHT_PROGBITS);
+
+    // Test get_string() method correctly with symbol names (if symbols exist)
+    auto symbols = elf.get_symbols_by_name("main");
+    if (!symbols.empty()) {
+        // Test string retrieval using symbol name index
+        REQUIRE(elf.get_string(symbols[0]->st_name) == "main");
+    }
+
+    // Test section contents can be retrieved
+    REQUIRE(!elf.get_section_contents(".text").empty());
+
+    // Set a load bias
+    constexpr std::uint64_t test_load_bias = 0x555555554000;
+    elf.notify_load_bias(xdb::virt_addr(test_load_bias));
+    REQUIRE(elf.load_bias().addr() == test_load_bias);
+    REQUIRE(elf.get_section_start_virt_addr(".text")->addr() - elf.get_section_start_file_addr(".text")->addr() ==
+            test_load_bias);
+
+    // Test get_symbol_at_address using entry point (should be _start symbol)
+    auto entry_point_file_addr = xdb::file_addr(elf, header.e_entry);
+    auto entry_point_virt_addr = xdb::virt_addr(elf.load_bias().addr() + header.e_entry);
+
+    REQUIRE(elf.get_symbol_at_file_addr(entry_point_file_addr) != nullptr);
+    REQUIRE(elf.get_string(elf.get_symbol_at_file_addr(entry_point_file_addr)->st_name) == "_start");
+
+    REQUIRE(elf.get_symbol_at_virt_addr(entry_point_virt_addr) != nullptr);
+    REQUIRE(elf.get_string(elf.get_symbol_at_virt_addr(entry_point_virt_addr)->st_name) == "_start");
+
+    // Verify both methods return the same symbol
+    REQUIRE(elf.get_symbol_at_file_addr(entry_point_file_addr) == elf.get_symbol_at_virt_addr(entry_point_virt_addr));
 }
