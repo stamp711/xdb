@@ -20,13 +20,20 @@ void print_help(std::span<const std::string> args) {
     } else if (args[1] == "breakpoint" || args[1] == "b") {
         std::cout << "Manage breakpoints.\n"
                   << "Usage:\n"
-                  << "    breakpoint list             - List all breakpoints\n"
-                  << "    breakpoint set <address>    - Set a breakpoint at the specified address\n"
+                  << "    breakpoint list                      - List all breakpoints\n"
+                  << "    breakpoint set <address>             - Set a breakpoint at the specified address\n"
+                  << "    breakpoint set <function_name>       - Set a breakpoint at the specified function\n"
                   << "    breakpoint set <address> --hardware/-h"
-                  << "                                - Set a hardware breakpoint at the specified address\n"
-                  << "    breakpoint enable <id>      - Enable a breakpoint by ID\n"
-                  << "    breakpoint disable <id>     - Disable a breakpoint by ID\n"
-                  << "    breakpoint delete <id>      - Delete a breakpoint by ID\n";
+                  << "                                         - Set a hardware breakpoint at the specified address\n"
+                  << "    breakpoint set <function_name> --hardware/-h"
+                  << "                                         - Set a hardware breakpoint at the specified function\n"
+                  << "    breakpoint enable <id>               - Enable a breakpoint by ID\n"
+                  << "    breakpoint disable <id>              - Disable a breakpoint by ID\n"
+                  << "    breakpoint delete <id>               - Delete a breakpoint by ID\n"
+                  << "Examples:\n"
+                  << "    breakpoint set 0x401000              - Set breakpoint at address\n"
+                  << "    breakpoint set main                  - Set breakpoint at main function\n"
+                  << "    b set main                           - Short form\n";
     } else if (args[1] == "catchpoint" || args[1] == "catch") {
         std::cout << "Manage catchpoints for syscalls.\n"
                   << "Usage:\n"

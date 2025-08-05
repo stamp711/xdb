@@ -180,16 +180,10 @@ std::string generate_signal_stop_reason(const xdb::target &target, const xdb::st
     auto message =
         fmt::format("stopped by signal {} at {:#x}", sigabbrev_np(reason.info), target.get_process().get_pc().addr());
 
-    const auto *func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
-
-    if (func != nullptr && ELF64_ST_TYPE(func->st_info) == STT_FUNC) {
-        auto func_name = target.get_elf().get_string(func->st_name);
-        message += fmt::format("\n In function {}", func_name);
-    }
-
     if (reason.info == SIGTRAP) {
         message += get_sigtrap_info(target.get_process(), reason);
     }
+
     return message;
 }
 
@@ -223,6 +217,11 @@ void print_stop_reason(const xdb::target &target, const xdb::stop_reason &reason
 void handle_stop(xdb::target &target, xdb::stop_reason reason) {
     print_stop_reason(target, reason);
     if (reason.state == xdb::process_state::stopped) {
+        const auto *func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
+        if (func != nullptr && ELF64_ST_TYPE(func->st_info) == STT_FUNC) {
+            auto func_name = target.get_elf().get_string(func->st_name);
+            fmt::println("In function {}:", func_name);
+        }
         constexpr std::size_t instr_cnt = 5;
         xdb_handlers::print_disassembly(target.get_process(), target.get_process().get_pc(), instr_cnt);
     }
@@ -236,7 +235,7 @@ void handle_command(std::unique_ptr<xdb::target> &target, std::string_view line)
     if (command == "help" || command == "h") {
         xdb_handlers::print_help(args);
     } else if (command == "breakpoint" || command == "b") {
-        xdb_handlers::handle_breakpoint_command(*process, args);
+        xdb_handlers::handle_breakpoint_command(*target, args);
     } else if (command == "catchpoint" || command == "catch") {
         xdb_handlers::handle_catchpoint_command(*process, args);
     } else if (command == "watchpoint" || command == "w") {

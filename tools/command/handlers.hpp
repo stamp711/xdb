@@ -1,6 +1,7 @@
 #pragma once
 
 #include <libxdb/process.hpp>
+#include <libxdb/target.hpp>
 #include <span>
 #include <string>
 
@@ -11,7 +12,7 @@ void print_help(std::span<const std::string> args);
 void print_help_init(std::initializer_list<std::string> args_list);
 
 // Breakpoint command handlers
-void handle_breakpoint_command(xdb::process &process, std::span<const std::string> args);
+void handle_breakpoint_command(xdb::target &target, std::span<const std::string> args);
 
 // Watchpoint command handlers
 void handle_watchpoint_command(xdb::process &process, std::span<const std::string> args);
