@@ -1,6 +1,7 @@
 function(add_test_target target_name source_file)
     add_executable(${target_name} ${source_file})
-    target_compile_options(${target_name} PRIVATE -g -O0 -pie)
+    target_compile_options(${target_name} PRIVATE -g -O0)
+    target_link_options(${target_name} PRIVATE -pie)
     add_dependencies(tests ${target_name})
 endfunction()
 
