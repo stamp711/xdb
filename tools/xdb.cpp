@@ -18,6 +18,7 @@
 #include <libxdb/register_info.hpp>
 #include <libxdb/registers.hpp>
 #include <libxdb/syscalls.hpp>
+#include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
 #include <span>
@@ -42,7 +43,7 @@ void handle_signal(int signum) {
     }
 }
 
-std::unique_ptr<xdb::process> attach(std::span<const char *const> args) {
+std::unique_ptr<xdb::target> attach(std::span<const char *const> args) {
     if (args.size() < 2) {
         std::cerr << "Usage: xdb [-p PID] [program_path]\n";
         return nullptr;
@@ -51,11 +52,11 @@ std::unique_ptr<xdb::process> attach(std::span<const char *const> args) {
     if (args.size() == 3 && args[1] == std::string_view("-p")) {
         // Attaching to a process by PID
         pid_t pid = static_cast<pid_t>(std::stoi(args[2]));
-        return xdb::process::attach(pid);
+        return xdb::target::attach(pid);
     }
 
     std::filesystem::path path(args[1]);
-    return xdb::process::launch(path);
+    return xdb::target::launch(path);
 }
 
 std::vector<std::string> split(std::string_view str, char delimiter) {
@@ -175,31 +176,42 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
     return message;
 }
 
-void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reason) {
+std::string generate_signal_stop_reason(const xdb::target &target, const xdb::stop_reason &reason) {
+    auto message =
+        fmt::format("stopped by signal {} at {:#x}", sigabbrev_np(reason.info), target.get_process().get_pc().addr());
+
+    const auto *func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
+
+    if (func != nullptr && ELF64_ST_TYPE(func->st_info) == STT_FUNC) {
+        auto func_name = target.get_elf().get_string(func->st_name);
+        message += fmt::format("\n In function {}", func_name);
+    }
+
+    if (reason.info == SIGTRAP) {
+        message += get_sigtrap_info(target.get_process(), reason);
+    }
+    return message;
+}
+
+void print_stop_reason(const xdb::target &target, const xdb::stop_reason &reason) {
     std::string message;
-    const char *sig = nullptr;
     switch (reason.state) {
         case xdb::process_state::running:
             message = "is running";
             break;
         case xdb::process_state::stopped:
-            sig = sigabbrev_np(reason.info);
-            message = fmt::format("stopped by signal {} at {:#x}", sig, process.get_pc().addr());
-            if (reason.info == SIGTRAP) {
-                message += get_sigtrap_info(process, reason);
-            }
+            message = generate_signal_stop_reason(target, reason);
             break;
         case xdb::process_state::exited:
             message = fmt::format("exited with status {}", reason.info);
             break;
         case xdb::process_state::terminated:
-            sig = sigabbrev_np(reason.info);
-            message = fmt::format("terminated by signal {}", sig);
+            message = fmt::format("terminated by signal {}", sigabbrev_np(reason.info));
             break;
         default:
             message = "state is unknown";
     }
-    fmt::println("Process {} {}", process.pid(), message);
+    fmt::println("Process {} {}", target.get_process().pid(), message);
 
     // Print additional syscall details if this is a syscall trap
     if (reason.state == xdb::process_state::stopped && reason.info == SIGTRAP &&
@@ -208,17 +220,18 @@ void print_stop_reason(const xdb::process &process, const xdb::stop_reason &reas
     }
 }
 
-void handle_stop(xdb::process &process, xdb::stop_reason reason) {
-    print_stop_reason(process, reason);
+void handle_stop(xdb::target &target, xdb::stop_reason reason) {
+    print_stop_reason(target, reason);
     if (reason.state == xdb::process_state::stopped) {
-        constexpr std::size_t print_instruction_count = 5;
-        xdb_handlers::print_disassembly(process, process.get_pc(), print_instruction_count);
+        constexpr std::size_t instr_cnt = 5;
+        xdb_handlers::print_disassembly(target.get_process(), target.get_process().get_pc(), instr_cnt);
     }
 }
 
-void handle_command(std::unique_ptr<xdb::process> &process, std::string_view line) {
+void handle_command(std::unique_ptr<xdb::target> &target, std::string_view line) {
     auto args = split(line, ' ');
     const auto &command = args[0];
+    auto *process = &target->get_process();
 
     if (command == "help" || command == "h") {
         xdb_handlers::print_help(args);
@@ -232,7 +245,7 @@ void handle_command(std::unique_ptr<xdb::process> &process, std::string_view lin
         if (process->state() == xdb::process_state::stopped) {
             process->resume();
             auto reason = process->wait_on_signal();
-            handle_stop(*process, reason);
+            handle_stop(*target, reason);
         } else {
             std::cerr << "Cannot continue because process state is not stopped\n";
         }
@@ -244,7 +257,7 @@ void handle_command(std::unique_ptr<xdb::process> &process, std::string_view lin
         xdb_handlers::handle_register_command(*process, args);
     } else if (command == "stepi" || command == "si") {
         auto reason = process->step_instruction();
-        handle_stop(*process, reason);
+        handle_stop(*target, reason);
     }
 
     else {
@@ -258,13 +271,13 @@ int run(std::span<const char *const> args) {
         return -1;
     }
 
-    auto process = attach(args);
+    auto target = attach(args);
 
     // Register signal handler
-    get_xdb_process() = process.get();
+    get_xdb_process() = &target->get_process();
     signal(SIGINT, handle_signal);
 
-    std::cout << "Attached to process with PID: " << process->pid() << '\n';
+    std::cout << "Attached to process with PID: " << target->get_process().pid() << '\n';
 
     // REPL
     std::unique_ptr<char, decltype(&free)> line_ptr{nullptr, &free};
@@ -283,7 +296,7 @@ int run(std::span<const char *const> args) {
         }
 
         if (!line_string.empty()) {
-            handle_command(process, line_string);
+            handle_command(target, line_string);
         }
     }
 

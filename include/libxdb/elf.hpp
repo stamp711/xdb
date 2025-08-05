@@ -54,7 +54,7 @@ class elf {
     void parse_symbol_table_();
     void build_symbol_maps_();
 
-    [[nodiscard]] std::string_view get_strtab_string_(std::size_t index) const;
+    [[nodiscard]] std::string_view get_section_name_(std::size_t index) const;
 
     std::filesystem::path path_;
     int fd_ = -1;  // fd for opened ELF file

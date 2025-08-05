@@ -228,7 +228,7 @@ void elf::parse_section_headers_() {
 void elf::build_section_map_() {
     section_header_map_.clear();
     for (const auto& section_header : section_headers_) {
-        section_header_map_[get_strtab_string_(section_header.sh_name)] = &section_header;
+        section_header_map_[get_section_name_(section_header.sh_name)] = &section_header;
     }
 }
 
@@ -275,9 +275,10 @@ void elf::build_symbol_maps_() {
     }
 }
 
-std::string_view elf::get_strtab_string_(std::size_t index) const {
-    const auto* strtab = &section_headers_[header_.e_shstrndx];
-    return {reinterpret_cast<const char*>(strtab) + index};
+std::string_view elf::get_section_name_(std::size_t index) const {
+    const auto* strtab_hdr = &section_headers_[header_.e_shstrndx];
+    const char* strtab_data = reinterpret_cast<const char*>(data_ + strtab_hdr->sh_offset);
+    return {strtab_data + index};
 }
 
 }  // namespace xdb
