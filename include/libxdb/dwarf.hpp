@@ -172,12 +172,15 @@ class die {
         return static_cast<std::size_t>(span_.data() - cu_->dwarf_info().debug_info().data());
     }
 
-    class children_range;
-    [[nodiscard]] children_range children() const;
-
     [[nodiscard]] bool contains(dw_attr_type_t attr) const;
     [[nodiscard]] attr operator[](dw_attr_type_t attr) const;
     [[nodiscard]] const abbrev& abbreviation() const { return *abbrev_; }
+
+    [[nodiscard]] file_addr low_pc() const;
+    [[nodiscard]] file_addr high_pc() const;
+
+    class children_range;
+    [[nodiscard]] children_range children() const;
 
    private:
     explicit die(const compile_unit* cu, const std::byte* next, std::span<const std::byte> span, const abbrev* abbrev,
@@ -239,34 +242,28 @@ class die::children_range {
 template <dw_form_t Form>
 struct form_type;
 
-template <>
-struct form_type<dw_form_t::DW_FORM_addr> {
-    using type = file_addr;
-};
-
-template <>
-struct form_type<dw_form_t::DW_FORM_sec_offset> {
-    using type = std::uint32_t;
-};
-
 class attr {
    public:
     attr() = delete;
-    attr(dw_attr_type_t type, dw_form_t form, const std::byte* location, const compile_unit& cu, const die& die)
-        : type_(type), form_(form), location_(location), cu_(&cu), die_(&die) {}
+    attr(dw_attr_type_t type, dw_form_t form, const std::byte* location, const compile_unit& cu)
+        : type_(type), form_(form), location_(location), cu_(&cu) {}
 
     [[nodiscard]] dw_attr_type_t type() const { return type_; }
     [[nodiscard]] dw_form_t form() const { return form_; }
 
-    template <dw_form_t Form>
-    [[nodiscard]] typename form_type<Form>::type get() const;
+    [[nodiscard]] file_addr as_address() const;
+    [[nodiscard]] std::uint32_t as_section_offset() const;
+    [[nodiscard]] std::span<const std::byte> as_block() const;
+    [[nodiscard]] std::uint64_t as_int() const;
+    [[nodiscard]] std::string_view as_string() const;
+    [[nodiscard]] die as_reference() const;
 
    private:
     dw_attr_type_t type_;
     dw_form_t form_;
     const std::byte* location_;
     const compile_unit* cu_;
-    const die* die_;
+    // const die* die_;  // We don't store die_ because there's no storage for them in dwarf, easy to use-after-free
 };
 
 }  // namespace xdb

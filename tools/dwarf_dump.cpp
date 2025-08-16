@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
@@ -69,7 +70,7 @@ class dwarf_dumper {
 
         switch (attr.form()) {
             case dw_form_t::DW_FORM_addr: {
-                auto addr_val = attr.get<dw_form_t::DW_FORM_addr>();
+                auto addr_val = attr.as_address();
                 ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << addr_val.addr();
                 return ss.str();
             }
@@ -81,19 +82,17 @@ class dwarf_dumper {
             case dw_form_t::DW_FORM_strp:
             case dw_form_t::DW_FORM_line_strp:
             case dw_form_t::DW_FORM_string: {
-                return "<string value>";
+                return std::string(attr.as_string());
             }
 
             default: {
                 // For high_pc that's not an address, show special formatting
                 if (attr.type() == dw_attr_type_t::DW_AT_high_pc && attr.form() != dw_form_t::DW_FORM_addr) {
-                    ss << "<offset-from-lowpc> <value>";
-                    if (die.contains(dw_attr_type_t::DW_AT_low_pc)) {
-                        auto low_pc_attr = die[dw_attr_type_t::DW_AT_low_pc];
-                        if (low_pc_attr.form() == dw_form_t::DW_FORM_addr) {
-                            ss << " <highpc: calculated>";
-                        }
-                    }
+                    auto offset = attr.as_int();
+                    ss << "<offset-from-lowpc> <" << offset << '>';
+                    ss << " <highpc: ";
+                    ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << die.high_pc().addr();
+                    ss << '>';
                     return ss.str();
                 }
 
