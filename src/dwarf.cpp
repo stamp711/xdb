@@ -1,5 +1,6 @@
 #include <libxdb/detail/dwarf.h>
 
+#include <algorithm>
 #include <cstddef>
 #include <libxdb/dwarf.hpp>
 #include <libxdb/elf.hpp>
@@ -264,11 +265,15 @@ attr die::operator[](dw_attr_type_t attr) const {
     for (std::size_t i = 0; i < attr_specs.size(); ++i) {
         const auto& spec = attr_specs[i];
         if (spec.type == attr) {
-            return {spec.type, spec.form, attr_locs_[i], *cu_, *this};
+            return {spec.type, spec.form, attr_locs_[i], *cu_};
         }
     }
     error::send("Attribute not found");
 }
+
+[[nodiscard]] file_addr die::low_pc() const {}
+
+[[nodiscard]] file_addr die::high_pc() const {}
 
 die::children_range die::children() const { return die::children_range(*this); }
 
@@ -308,21 +313,120 @@ bool die::children_range::iterator::operator==(const iterator& other) const {
     return die_->span_.data() == other.die_->span_.data();
 }
 
-template <>
-file_addr attr::get<dw_form_t::DW_FORM_addr>() const {
+file_addr attr::as_address() const {
     if (form_ != dw_form_t::DW_FORM_addr) error::send("Invalid form");
-    // Create a cursor to: [beginning of attr, end of die)
-    cursor cur({location_, die_->span().end().base()});
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
     const auto& elf = this->cu_->dwarf_info().elf_file();
     return file_addr(elf, cur.get_u64());
 }
 
-template <>
-std::uint32_t attr::get<dw_form_t::DW_FORM_sec_offset>() const {
+std::uint32_t attr::as_section_offset() const {
     if (form_ != dw_form_t::DW_FORM_sec_offset) error::send("Invalid form");
-    // Create a cursor to: [beginning of attr, end of die)
-    cursor cur({location_, die_->span().end().base()});
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
     return cur.get_u32();
+}
+
+std::uint64_t attr::as_int() const {
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
+    switch (form_) {
+        case dw_form_t::DW_FORM_data1:
+            return cur.get_u8();
+        case dw_form_t::DW_FORM_data2:
+            return cur.get_u16();
+        case dw_form_t::DW_FORM_data4:
+            return cur.get_u32();
+        case dw_form_t::DW_FORM_data8:
+            return cur.get_u64();
+        case dw_form_t::DW_FORM_udata:
+            return cur.get_uleb128();
+        default:
+            error::send("Invalid integer form");
+    }
+}
+
+std::span<const std::byte> attr::as_block() const {
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
+    std::size_t size = 0;
+    switch (form_) {
+        case dw_form_t::DW_FORM_block1:
+            size = cur.get_u8();
+            break;
+        case dw_form_t::DW_FORM_block2:
+            size = cur.get_u16();
+            break;
+        case dw_form_t::DW_FORM_block4:
+            size = cur.get_u32();
+            break;
+        case dw_form_t::DW_FORM_block:
+            size = cur.get_uleb128();
+            break;
+        default:
+            error::send("Invalid block form");
+    }
+    return {cur.data(), size};
+}
+
+die attr::as_reference() const {
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
+    std::size_t offset = 0;
+    switch (form_) {
+        case dw_form_t::DW_FORM_ref1:
+            offset = cur.get_u8();
+            break;
+        case dw_form_t::DW_FORM_ref2:
+            offset = cur.get_u16();
+            break;
+        case dw_form_t::DW_FORM_ref4:
+            offset = cur.get_u32();
+            break;
+        case dw_form_t::DW_FORM_ref8:
+            offset = cur.get_u64();
+            break;
+        case dw_form_t::DW_FORM_ref_udata:
+            offset = cur.get_uleb128();
+            break;
+        case dw_form_t::DW_FORM_ref_addr: {
+            // Special handling
+            offset = cur.get_u32();
+            auto debug_info_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_info");
+            const std::byte* die_pos = debug_info_span.data() + offset;
+
+            const auto& cus = cu_->dwarf_info().compile_units();
+            const auto& containing_cu = *std::ranges::find_if(cus, [&](const auto& cu) {
+                auto cu_span = cu->span();
+                return die_pos >= cu_span.data() && die_pos < cu_span.data() + cu_span.size();
+            });
+
+            cursor ref_cursor({die_pos, containing_cu->span().end().base()});
+            return parse_die(*containing_cu, ref_cursor);
+        }
+        default:
+            error::send("Invalid reference form");
+    }
+    cursor ref_cursor(cu_->span().subspan(offset));
+    return parse_die(*cu_, ref_cursor);
+}
+
+std::string_view xdb::attr::as_string() const {
+    // Create a cursor to: [beginning of attr, end of cu)
+    cursor cur({location_, cu_->span().end().base()});
+    switch (form_) {
+        case dw_form_t::DW_FORM_string:
+            return cur.get_string();
+        case dw_form_t::DW_FORM_strp: {
+            auto offset = cur.get_u32();
+            auto debug_str_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_str");
+            cursor stab_cur({debug_str_span.begin() + offset, debug_str_span.end()});
+            return stab_cur.get_string();
+        }
+        default:
+            error::send("Invalid string form");
+    }
 }
 
 }  // namespace xdb
