@@ -21,33 +21,33 @@ class elf {
 
     elf(const elf&) = delete;
     elf(elf&&) = delete;
-    elf& operator=(const elf&) = delete;
-    elf& operator=(elf&&) = delete;
+    auto operator=(const elf&) -> elf& = delete;
+    auto operator=(elf&&) -> elf& = delete;
 
     auto operator==(const elf& other) const noexcept -> bool { return path_ == other.path_ && data_ == other.data_; }
 
-    [[nodiscard]] std::filesystem::path path() const noexcept { return path_; }
-    [[nodiscard]] const Elf64_Ehdr& header() const noexcept { return header_; }
+    auto path() const noexcept -> std::filesystem::path { return path_; }
+    auto header() const noexcept -> const Elf64_Ehdr& { return header_; }
 
     void notify_load_bias(virt_addr bias) noexcept { load_bias_ = bias; }
-    [[nodiscard]] virt_addr load_bias() const noexcept { return load_bias_; }
+    auto load_bias() const noexcept -> virt_addr { return load_bias_; }
 
     // Section related
-    [[nodiscard]] const Elf64_Shdr* get_section_header(std::string_view name) const;
-    [[nodiscard]] std::span<const std::byte> get_section_contents(std::string_view name) const;
-    [[nodiscard]] std::optional<file_addr> get_section_start_file_addr(std::string_view name) const;
-    [[nodiscard]] std::optional<virt_addr> get_section_start_virt_addr(std::string_view name) const;
-    [[nodiscard]] const Elf64_Shdr* get_section_header_containing_file_addr(file_addr file_addr) const;
-    [[nodiscard]] const Elf64_Shdr* get_section_header_containing_virt_addr(virt_addr virt_addr) const;
+    auto get_section_header(std::string_view name) const -> const Elf64_Shdr*;
+    auto get_section_contents(std::string_view name) const -> std::span<const std::byte>;
+    auto get_section_start_file_addr(std::string_view name) const -> std::optional<file_addr>;
+    auto get_section_start_virt_addr(std::string_view name) const -> std::optional<virt_addr>;
+    auto get_section_header_containing_file_addr(file_addr file_addr) const -> const Elf64_Shdr*;
+    auto get_section_header_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Shdr*;
 
-    [[nodiscard]] std::string_view get_string(std::size_t index) const;
+    auto get_string(std::size_t index) const -> std::string_view;
 
     // Symbols related
-    [[nodiscard]] std::vector<const Elf64_Sym*> get_symbols_by_name(std::string_view name) const;
-    [[nodiscard]] const Elf64_Sym* get_symbol_at_file_addr(file_addr file_addr) const;
-    [[nodiscard]] const Elf64_Sym* get_symbol_at_virt_addr(virt_addr virt_addr) const;
-    [[nodiscard]] const Elf64_Sym* get_symbol_containing_file_addr(file_addr file_addr) const;
-    [[nodiscard]] const Elf64_Sym* get_symbol_containing_virt_addr(virt_addr virt_addr) const;
+    auto get_symbols_by_name(std::string_view name) const -> std::vector<const Elf64_Sym*>;
+    auto get_symbol_at_file_addr(file_addr file_addr) const -> const Elf64_Sym*;
+    auto get_symbol_at_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym*;
+    auto get_symbol_containing_file_addr(file_addr file_addr) const -> const Elf64_Sym*;
+    auto get_symbol_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym*;
 
    private:
     void assert_load_bias_set_() const;
@@ -56,7 +56,7 @@ class elf {
     void parse_symbol_table_();
     void build_symbol_maps_();
 
-    [[nodiscard]] std::string_view get_section_name_(std::size_t index) const;
+    auto get_section_name_(std::size_t index) const -> std::string_view;
 
     std::filesystem::path path_;
     int fd_ = -1;  // fd for opened ELF file
@@ -76,15 +76,16 @@ class elf {
     struct addr_range_cmp {
         using is_transparent = std::true_type;
         // Look up by range - only compare starting address
-        bool operator()(const std::pair<file_addr, file_addr>& lhs, const std::pair<file_addr, file_addr>& rhs) const {
+        auto operator()(const std::pair<file_addr, file_addr>& lhs, const std::pair<file_addr, file_addr>& rhs) const
+            -> bool {
             return lhs.first < rhs.first;
         }
         // range < file_addr
-        bool operator()(const std::pair<file_addr, file_addr>& lhs, const file_addr& addr) const {
+        auto operator()(const std::pair<file_addr, file_addr>& lhs, const file_addr& addr) const -> bool {
             return lhs.second <= addr;
         }
         // file_addr < range
-        bool operator()(const file_addr& addr, const std::pair<file_addr, file_addr>& rhs) const {
+        auto operator()(const file_addr& addr, const std::pair<file_addr, file_addr>& rhs) const -> bool {
             return addr < rhs.first;
         }
     };

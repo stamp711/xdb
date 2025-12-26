@@ -25,8 +25,8 @@ class scope_guard {
     }
     scope_guard(const scope_guard&) = delete;
     scope_guard(scope_guard&&) = delete;
-    scope_guard& operator=(const scope_guard&) = delete;
-    scope_guard& operator=(scope_guard&&) = delete;
+    auto operator=(const scope_guard&) -> scope_guard& = delete;
+    auto operator=(scope_guard&&) -> scope_guard& = delete;
 
     void dismiss() { active_ = false; }
 };
@@ -40,7 +40,7 @@ elf::elf(std::filesystem::path path) : path_(std::move(path)) {
         error::send_errno("Could not open ELF file");
     }
     fd_ = fd;
-    scope_guard guard_fd([this]() {
+    scope_guard guard_fd([this]() -> void {
         if (fd_ >= 0) {
             close(fd_);
         }
@@ -57,7 +57,7 @@ elf::elf(std::filesystem::path path) : path_(std::move(path)) {
         error::send_errno("Could not mmap ELF file");
     }
     data_ = addr;
-    scope_guard guard_mmap([this]() {
+    scope_guard guard_mmap([this]() -> void {
         if (data_) {
             munmap(data_, file_size_);
         }
@@ -84,7 +84,7 @@ elf::~elf() {
     }
 }
 
-const Elf64_Shdr* elf::get_section_header(std::string_view name) const {
+auto elf::get_section_header(std::string_view name) const -> const Elf64_Shdr* {
     auto it = section_header_map_.find(name);
     if (it == section_header_map_.end()) {
         return nullptr;
@@ -92,7 +92,7 @@ const Elf64_Shdr* elf::get_section_header(std::string_view name) const {
     return it->second;
 }
 
-std::span<const std::byte> elf::get_section_contents(std::string_view name) const {
+auto elf::get_section_contents(std::string_view name) const -> std::span<const std::byte> {
     const auto* shdr = get_section_header(name);
     if (shdr == nullptr) {
         return {};
@@ -102,7 +102,7 @@ std::span<const std::byte> elf::get_section_contents(std::string_view name) cons
     return {data_ + offset, size};
 }
 
-std::optional<file_addr> elf::get_section_start_file_addr(std::string_view name) const {
+auto elf::get_section_start_file_addr(std::string_view name) const -> std::optional<file_addr> {
     const auto* shdr = get_section_header(name);
     if (shdr == nullptr) {
         return std::nullopt;
@@ -110,7 +110,7 @@ std::optional<file_addr> elf::get_section_start_file_addr(std::string_view name)
     return file_addr(*this, shdr->sh_offset);
 }
 
-std::optional<virt_addr> elf::get_section_start_virt_addr(std::string_view name) const {
+auto elf::get_section_start_virt_addr(std::string_view name) const -> std::optional<virt_addr> {
     const auto* shdr = get_section_header(name);
     if (shdr == nullptr) {
         return std::nullopt;
@@ -119,7 +119,7 @@ std::optional<virt_addr> elf::get_section_start_virt_addr(std::string_view name)
     return virt_addr(load_bias_ + shdr->sh_addr);
 }
 
-const Elf64_Shdr* elf::get_section_header_containing_file_addr(file_addr file_addr) const {
+auto elf::get_section_header_containing_file_addr(file_addr file_addr) const -> const Elf64_Shdr* {
     if (file_addr.elf_file() != this) return nullptr;
     for (const auto& shdr : section_headers_) {
         if (shdr.sh_addr <= file_addr.addr() && file_addr.addr() < shdr.sh_addr + shdr.sh_size) {
@@ -129,7 +129,7 @@ const Elf64_Shdr* elf::get_section_header_containing_file_addr(file_addr file_ad
     return nullptr;
 }
 
-const Elf64_Shdr* elf::get_section_header_containing_virt_addr(virt_addr virt_addr) const {
+auto elf::get_section_header_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Shdr* {
     assert_load_bias_set_();
     for (const auto& shdr : section_headers_) {
         if (load_bias_ + shdr.sh_addr <= virt_addr && virt_addr < load_bias_ + shdr.sh_addr + shdr.sh_size) {
@@ -139,7 +139,7 @@ const Elf64_Shdr* elf::get_section_header_containing_virt_addr(virt_addr virt_ad
     return nullptr;
 }
 
-std::string_view elf::get_string(std::size_t index) const {
+auto elf::get_string(std::size_t index) const -> std::string_view {
     // NOTE: Although most ELF files have a general string table, in some cases they may allocate different string
     // tables to different sections.
     //
@@ -153,14 +153,16 @@ std::string_view elf::get_string(std::size_t index) const {
     return {reinterpret_cast<const char*>(&strs[index])};
 }
 
-std::vector<const Elf64_Sym*> elf::get_symbols_by_name(std::string_view name) const {
+auto elf::get_symbols_by_name(std::string_view name) const -> std::vector<const Elf64_Sym*> {
     const auto [begin, end] = symbol_name_map_.equal_range(name);
     std::vector<const Elf64_Sym*> res;
-    std::transform(begin, end, std::back_inserter(res), [](const auto& it) { return it.second; });
+    for (const auto& [_name, sym] : std::ranges::subrange(begin, end)) {
+        res.push_back(sym);
+    }
     return res;
 }
 
-const Elf64_Sym* elf::get_symbol_at_file_addr(file_addr file_addr) const {
+auto elf::get_symbol_at_file_addr(file_addr file_addr) const -> const Elf64_Sym* {
     if (file_addr.elf_file() != this) return nullptr;
     auto it = symbol_addr_map_.find({file_addr, file_addr});
     if (it != symbol_addr_map_.end()) {
@@ -169,13 +171,13 @@ const Elf64_Sym* elf::get_symbol_at_file_addr(file_addr file_addr) const {
     return nullptr;
 }
 
-const Elf64_Sym* elf::get_symbol_at_virt_addr(virt_addr virt_addr) const {
+auto elf::get_symbol_at_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym* {
     auto file_addr = virt_addr.to_file_addr(*this);
     if (file_addr == std::nullopt) return nullptr;
     return get_symbol_containing_file_addr(*file_addr);
 }
 
-const Elf64_Sym* elf::get_symbol_containing_file_addr(file_addr file_addr) const {
+auto elf::get_symbol_containing_file_addr(file_addr file_addr) const -> const Elf64_Sym* {
     if (file_addr.elf_file() != this) return nullptr;
 
     // Use equal_range to find all ranges that could contain this address
@@ -191,7 +193,7 @@ const Elf64_Sym* elf::get_symbol_containing_file_addr(file_addr file_addr) const
     return end_it->second;
 }
 
-const Elf64_Sym* elf::get_symbol_containing_virt_addr(virt_addr virt_addr) const {
+auto elf::get_symbol_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym* {
     auto file_addr = virt_addr.to_file_addr(*this);
     if (file_addr == std::nullopt) return nullptr;
     return get_symbol_containing_file_addr(*file_addr);
@@ -275,7 +277,7 @@ void elf::build_symbol_maps_() {
     }
 }
 
-std::string_view elf::get_section_name_(std::size_t index) const {
+auto elf::get_section_name_(std::size_t index) const -> std::string_view {
     const auto* strtab_hdr = &section_headers_[header_.e_shstrndx];
     const char* strtab_data = reinterpret_cast<const char*>(data_ + strtab_hdr->sh_offset);
     return {strtab_data + index};
