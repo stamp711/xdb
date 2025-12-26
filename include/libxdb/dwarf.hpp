@@ -41,30 +41,30 @@ class cursor {
    public:
     explicit cursor(std::span<const std::byte> span) : span_(span) {}
 
-    [[nodiscard]] const std::byte* data() const noexcept { return span_.data(); }
+    auto data() const noexcept -> const std::byte* { return span_.data(); }
 
-    cursor& operator++() { return span_ = span_.subspan(1), *this; }
-    cursor& operator+=(std::size_t offset) { return span_ = span_.subspan(offset), *this; }
+    auto operator++() -> cursor& { return span_ = span_.subspan(1), *this; }
+    auto operator+=(std::size_t offset) -> cursor& { return span_ = span_.subspan(offset), *this; }
 
-    [[nodiscard]] bool finished() const noexcept { return span_.empty(); }
+    auto finished() const noexcept -> bool { return span_.empty(); }
 
     template <class T>
-    T get_fixed_int() {
+    auto get_fixed_int() -> T {
         auto t = xdb::from_bytes<T>(span_.data());
         *this += sizeof(T);
         return t;
     }
 
-    std::uint8_t get_u8() { return get_fixed_int<std::uint8_t>(); }
-    std::uint16_t get_u16() { return get_fixed_int<std::uint16_t>(); }
-    std::uint32_t get_u32() { return get_fixed_int<std::uint32_t>(); }
-    std::uint64_t get_u64() { return get_fixed_int<std::uint64_t>(); }
-    std::int8_t get_i8() { return get_fixed_int<std::int8_t>(); }
-    std::int16_t get_i16() { return get_fixed_int<std::int16_t>(); }
-    std::int32_t get_i32() { return get_fixed_int<std::int32_t>(); }
-    std::int64_t get_i64() { return get_fixed_int<std::int64_t>(); }
+    auto get_u8() -> std::uint8_t { return get_fixed_int<std::uint8_t>(); }
+    auto get_u16() -> std::uint16_t { return get_fixed_int<std::uint16_t>(); }
+    auto get_u32() -> std::uint32_t { return get_fixed_int<std::uint32_t>(); }
+    auto get_u64() -> std::uint64_t { return get_fixed_int<std::uint64_t>(); }
+    auto get_i8() -> std::int8_t { return get_fixed_int<std::int8_t>(); }
+    auto get_i16() -> std::int16_t { return get_fixed_int<std::int16_t>(); }
+    auto get_i32() -> std::int32_t { return get_fixed_int<std::int32_t>(); }
+    auto get_i64() -> std::int64_t { return get_fixed_int<std::int64_t>(); }
 
-    std::string_view get_string() {
+    auto get_string() -> std::string_view {
         auto null_terminator = std::ranges::find(span_, std::byte{0});
         auto strlen = static_cast<std::size_t>(null_terminator - span_.begin());
         std::string_view ret(reinterpret_cast<const char*>(span_.data()), strlen);
@@ -72,7 +72,7 @@ class cursor {
         return ret;
     }
 
-    std::uint64_t get_uleb128() {
+    auto get_uleb128() -> std::uint64_t {
         std::uint64_t res = 0;
         std::size_t shift = 0;
         std::uint8_t byte = 0;
@@ -85,7 +85,7 @@ class cursor {
         return res;
     }
 
-    std::int64_t get_sleb128() {
+    auto get_sleb128() -> std::int64_t {
         std::uint64_t res = 0;  // use uint because left shifting negative int is UB
         std::size_t shift = 0;
         std::uint8_t byte = 0;
@@ -115,13 +115,14 @@ class dwarf {
     ~dwarf() = default;
     dwarf(const dwarf&) = delete;
     dwarf(dwarf&&) = delete;
-    dwarf& operator=(const dwarf&) = delete;
-    dwarf& operator=(dwarf&&) = delete;
 
-    [[nodiscard]] const elf& elf_file() const { return *elf_; }
-    [[nodiscard]] std::span<const std::byte> debug_info() const { return debug_info_span_; }
-    [[nodiscard]] const std::unordered_map<std::uint64_t, abbrev>& get_abbrev_table(std::size_t byte_offset);
-    [[nodiscard]] const std::vector<std::unique_ptr<compile_unit>>& compile_units() const { return compile_units_; }
+    auto operator=(const dwarf&) -> dwarf& = delete;
+    auto operator=(dwarf&&) -> dwarf& = delete;
+
+    auto elf_file() const -> const elf& { return *elf_; }
+    auto debug_info() const -> std::span<const std::byte> { return debug_info_span_; }
+    auto get_abbrev_table(std::size_t byte_offset) -> const std::unordered_map<std::uint64_t, abbrev>&;
+    auto compile_units() const -> const std::vector<std::unique_ptr<compile_unit>>& { return compile_units_; }
 
    private:
     const elf* elf_;
@@ -136,13 +137,13 @@ class compile_unit {
     compile_unit(dwarf& parent_dwarf, std::span<const std::byte> span, std::size_t abbrev_offset)
         : parent(&parent_dwarf), span_(span), abbrev_offset_(abbrev_offset) {}
 
-    [[nodiscard]] const dwarf& dwarf_info() const { return *parent; }
-    [[nodiscard]] std::span<const std::byte> span() const { return span_; }
-    [[nodiscard]] const std::unordered_map<std::uint64_t, abbrev>& abbrev_table() const {
+    auto dwarf_info() const -> const dwarf& { return *parent; }
+    auto span() const -> std::span<const std::byte> { return span_; }
+    auto abbrev_table() const -> const std::unordered_map<std::uint64_t, abbrev>& {
         return parent->get_abbrev_table(abbrev_offset_);
     }
 
-    [[nodiscard]] die root() const;
+    auto root() const -> die;
 
    private:
     dwarf* parent;
@@ -155,33 +156,33 @@ class die {
     die() = delete;
 
     // Constructor for null (terminator) DIEs, only cu_ and next_ is valid
-    static die null(const compile_unit& cu, const std::byte* next) { return die(&cu, next, {}, nullptr, {}); }
+    static auto null(const compile_unit& cu, const std::byte* next) -> die { return die(&cu, next, {}, nullptr, {}); }
 
     // Constructor for non-null DIEs
-    static die non_null(const compile_unit& cu, const std::byte* next, std::span<const std::byte> span,
-                        const abbrev& abbrev, std::vector<const std::byte*> attr_locs) {
+    static auto non_null(const compile_unit& cu, const std::byte* next, std::span<const std::byte> span,
+                         const abbrev& abbrev, std::vector<const std::byte*> attr_locs) -> die {
         return die(&cu, next, span, &abbrev, std::move(attr_locs));
     }
 
-    [[nodiscard]] bool is_null() const { return abbrev_ == nullptr; }
-    [[nodiscard]] std::span<const std::byte> next_die_parse_span() const;
+    auto is_null() const -> bool { return abbrev_ == nullptr; }
+    auto next_die_parse_span() const -> std::span<const std::byte>;
 
     // calling any public method below for null DIE is UB.
 
-    [[nodiscard]] std::span<const std::byte> span() const { return span_; }
-    [[nodiscard]] std::size_t offset_in_debug_info() const {
+    auto span() const -> std::span<const std::byte> { return span_; }
+    auto offset_in_debug_info() const -> std::size_t {
         return static_cast<std::size_t>(span_.data() - cu_->dwarf_info().debug_info().data());
     }
 
-    [[nodiscard]] bool contains(dw_attr_type_t attr) const;
-    [[nodiscard]] attr operator[](dw_attr_type_t attr) const;
-    [[nodiscard]] const abbrev& abbreviation() const { return *abbrev_; }
+    auto contains(dw_attr_type_t attr) const -> bool;
+    auto operator[](dw_attr_type_t attr) const -> class attr;
+    auto abbreviation() const -> const abbrev& { return *abbrev_; }
 
-    [[nodiscard]] file_addr low_pc() const;
-    [[nodiscard]] file_addr high_pc() const;
+    auto low_pc() const -> file_addr;
+    auto high_pc() const -> file_addr;
 
     class children_range;
-    [[nodiscard]] children_range children() const;
+    auto children() const -> children_range;
 
    private:
     explicit die(const compile_unit* cu, const std::byte* next, std::span<const std::byte> span, const abbrev* abbrev,
@@ -211,30 +212,30 @@ class die::children_range {
         explicit iterator() = default;
         explicit iterator(const die& die);
 
-        const die& operator*() const { return die_.value(); }
-        const die* operator->() const { return &die_.value(); }
+        auto operator*() const -> const die& { return die_.value(); }
+        auto operator->() const -> const die* { return &die_.value(); }
 
-        iterator& operator++();
-        iterator operator++(int) {
+        auto operator++() -> iterator&;
+        auto operator++(int) -> iterator {
             iterator tmp = *this;
             ++(*this);
             return tmp;
         }
 
-        bool operator==(const iterator& other) const;
-        bool operator!=(const iterator& other) const { return !(*this == other); }
+        auto operator==(const iterator& other) const -> bool;
+        auto operator!=(const iterator& other) const -> bool { return !(*this == other); }
 
        private:
         std::optional<die> die_;
     };
 
-    [[nodiscard]] iterator begin() const {
+    auto begin() const -> iterator {
         if (die_.abbrev_->has_children) {
             return iterator{die_};
         }
         return end();
     }
-    [[nodiscard]] static iterator end() { return iterator{}; }
+    auto end() const -> iterator { return iterator{}; }
 
    private:
     die die_;
@@ -247,16 +248,16 @@ class attr {
     attr(dw_attr_type_t type, dw_form_t form, const std::byte* location, const compile_unit& cu)
         : type_(type), form_(form), location_(location), cu_(&cu) {}
 
-    [[nodiscard]] dw_attr_type_t type() const { return type_; }
-    [[nodiscard]] dw_form_t form() const { return form_; }
+    auto type() const -> dw_attr_type_t { return type_; }
+    auto form() const -> dw_form_t { return form_; }
 
-    [[nodiscard]] file_addr as_address() const;
-    [[nodiscard]] std::uint32_t as_section_offset() const;
-    [[nodiscard]] std::span<const std::byte> as_block() const;
-    [[nodiscard]] std::uint64_t as_int() const;
-    [[nodiscard]] std::string_view as_string() const;
-    [[nodiscard]] die as_reference() const;
-    [[nodiscard]] auto as_range_list() const -> range_list;
+    auto as_address() const -> file_addr;
+    auto as_section_offset() const -> std::uint32_t;
+    auto as_block() const -> std::span<const std::byte>;
+    auto as_int() const -> std::uint64_t;
+    auto as_string() const -> std::string_view;
+    auto as_reference() const -> die;
+    auto as_range_list() const -> range_list;
 
    private:
     dw_attr_type_t type_;
@@ -276,14 +277,14 @@ class range_list {
     struct entry {
         file_addr low;
         file_addr high;
-        [[nodiscard]] auto contains(file_addr addr) const -> bool { return low <= addr && addr < high; }
+        auto contains(file_addr addr) const -> bool { return low <= addr && addr < high; }
     };
 
     class iterator;
-    [[nodiscard]] auto begin() const -> iterator;
-    [[nodiscard]] auto end() const -> iterator;
+    auto begin() const -> iterator;
+    auto end() const -> iterator;
 
-    [[nodiscard]] auto contains(file_addr addr) const -> bool;
+    auto contains(file_addr addr) const -> bool;
 
    private:
     const compile_unit* cu_;  // always valid
@@ -309,11 +310,11 @@ class range_list::iterator {
     iterator(const iterator& other) = default;
     auto operator=(const iterator&) -> iterator& = default;
 
-    [[nodiscard]] auto operator*() const -> reference;
-    [[nodiscard]] auto operator->() const -> pointer;
+    auto operator*() const -> reference;
+    auto operator->() const -> pointer;
 
-    [[nodiscard]] auto operator==(const iterator& other) const -> bool { return pos_ == other.pos_; }
-    [[nodiscard]] auto operator!=(const iterator& other) const -> bool { return pos_ != other.pos_; }
+    auto operator==(const iterator& other) const -> bool { return pos_ == other.pos_; }
+    auto operator!=(const iterator& other) const -> bool { return pos_ != other.pos_; }
 
     auto operator++() -> iterator&;
     auto operator++(int) -> iterator {

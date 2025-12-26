@@ -11,7 +11,8 @@
 
 namespace {
 
-std::unordered_map<std::uint64_t, xdb::abbrev> parse_abbrev_table(const xdb::elf& elf, std::size_t byte_offset) {
+auto parse_abbrev_table(const xdb::elf& elf, std::size_t byte_offset)
+    -> std::unordered_map<std::uint64_t, xdb::abbrev> {
     xdb::cursor cur(elf.get_section_contents(".debug_abbrev"));
     cur += byte_offset;
 
@@ -44,7 +45,7 @@ std::unordered_map<std::uint64_t, xdb::abbrev> parse_abbrev_table(const xdb::elf
     return abbrev_table;
 }
 
-std::unique_ptr<xdb::compile_unit> parse_compile_unit(xdb::dwarf& dwarf, xdb::cursor cursor) {
+auto parse_compile_unit(xdb::dwarf& dwarf, xdb::cursor cursor) -> std::unique_ptr<xdb::compile_unit> {
     const auto* start = cursor.data();
 
     // Format ref: DWARF5.pdf 7.5.1.1
@@ -74,8 +75,8 @@ std::unique_ptr<xdb::compile_unit> parse_compile_unit(xdb::dwarf& dwarf, xdb::cu
     return std::make_unique<xdb::compile_unit>(dwarf, span, debug_abbrev_offset);
 }
 
-std::vector<std::unique_ptr<xdb::compile_unit>> parse_compile_units(xdb::dwarf& dwarf,
-                                                                    std::span<const std::byte> debug_info) {
+auto parse_compile_units(xdb::dwarf& dwarf, std::span<const std::byte> debug_info)
+    -> std::vector<std::unique_ptr<xdb::compile_unit>> {
     xdb::cursor cursor(debug_info);
     std::vector<std::unique_ptr<xdb::compile_unit>> compile_units;
     while (!cursor.finished()) {
@@ -86,7 +87,7 @@ std::vector<std::unique_ptr<xdb::compile_unit>> parse_compile_units(xdb::dwarf& 
     return compile_units;
 }
 
-xdb::die parse_die(const xdb::compile_unit& cu, xdb::cursor cur) {
+auto parse_die(const xdb::compile_unit& cu, xdb::cursor cur) -> xdb::die {
     const auto* start = cur.data();
 
     // Each debugging information entry begins with an unsigned LEB128 number
@@ -243,7 +244,7 @@ dwarf::dwarf(const elf& parent_elf) : elf_(&parent_elf) {
     compile_units_ = parse_compile_units(*this, debug_info_span_);
 }
 
-const std::unordered_map<std::uint64_t, abbrev>& dwarf::get_abbrev_table(std::size_t byte_offset) {
+auto dwarf::get_abbrev_table(std::size_t byte_offset) -> const std::unordered_map<std::uint64_t, abbrev>& {
     if (!abbrev_table_cache_.contains(byte_offset)) {
         auto abbrev_table = parse_abbrev_table(*elf_, byte_offset);
         auto abbrev_table_ptr =
@@ -255,7 +256,7 @@ const std::unordered_map<std::uint64_t, abbrev>& dwarf::get_abbrev_table(std::si
 
 // ========== impl compile_unit ==========
 
-die compile_unit::root() const {
+auto compile_unit::root() const -> die {
     constexpr auto cu_header_size = 12;  // For 32-bit DWARF 5, see parse_compile_unit()
     cursor cur({span_.begin() + cu_header_size, span_.end()});
     return parse_die(*this, cur);
@@ -263,33 +264,33 @@ die compile_unit::root() const {
 
 // ========== impl die ==========
 
-std::span<const std::byte> die::next_die_parse_span() const {
+auto die::next_die_parse_span() const -> std::span<const std::byte> {
     const auto* start = next_;
     auto size = static_cast<std::size_t>(cu_->span().data() + cu_->span().size() - start);
     return {start, size};
 }
 
-bool die::contains(dw_attr_type_t attr) const {
-    return std::ranges::any_of(abbrev_->attrs, [attr](const auto& spec) { return spec.type == attr; });
+auto die::contains(dw_attr_type_t attr) const -> bool {
+    return std::ranges::any_of(abbrev_->attrs, [attr](const auto& spec) -> bool { return spec.type == attr; });
 }
 
-attr die::operator[](dw_attr_type_t attr) const {
+auto die::operator[](dw_attr_type_t att) const -> attr {
     const auto& attr_specs = abbrev_->attrs;
     for (std::size_t i = 0; i < attr_specs.size(); ++i) {
         const auto& spec = attr_specs[i];
-        if (spec.type == attr) {
+        if (spec.type == att) {
             return {spec.type, spec.form, attr_locs_[i], *cu_};
         }
     }
     error::send("Attribute not found");
 }
 
-[[nodiscard]] file_addr die::low_pc() const { return (*this)[dw_attr_type_t::DW_AT_low_pc].as_address(); }
+auto die::low_pc() const -> file_addr { return (*this)[dw_attr_type_t::DW_AT_low_pc].as_address(); }
 
-[[nodiscard]] file_addr die::high_pc() const {
+auto die::high_pc() const -> file_addr {
     auto attr = (*this)[dw_attr_type_t::DW_AT_high_pc];
 
-    // From DWARF5.pdf, 2.17.2:
+    // Per DWARF5.pdf, 2.17.2:
     // If the value of the DW_AT_high_pc is of class address, it is the address of the first location past the last
     // instruction associated with the entity; if it is of class constant, the value is an unsigned integer offset which
     // when added to the low PC gives the address of the first location past the last instruction associated with the
@@ -303,14 +304,14 @@ attr die::operator[](dw_attr_type_t attr) const {
 
 // ========== impl die::children_range && iterator ==========
 
-die::children_range die::children() const { return die::children_range(*this); }
+auto die::children() const -> die::children_range { return die::children_range(*this); }
 
 die::children_range::iterator::iterator(const die& die) {
     cursor next_cur({die.next_die_parse_span()});
     die_ = parse_die(*die.cu_, next_cur);
 }
 
-die::children_range::iterator& die::children_range::iterator::operator++() {
+auto die::children_range::iterator::operator++() -> die::children_range::iterator& {
     if (!die_ || die_->is_null()) return *this;
 
     if (!die_->abbrev_->has_children) {
@@ -330,7 +331,7 @@ die::children_range::iterator& die::children_range::iterator::operator++() {
     return *this;
 }
 
-bool die::children_range::iterator::operator==(const iterator& other) const {
+auto die::children_range::iterator::operator==(const iterator& other) const -> bool {
     auto is_null = !die_ || die_->is_null();
     auto other_is_null = !other.die_ || other.die_->is_null();
 
@@ -343,7 +344,7 @@ bool die::children_range::iterator::operator==(const iterator& other) const {
 
 // ========== impl attr ==========
 
-file_addr attr::as_address() const {
+auto attr::as_address() const -> file_addr {
     if (form_ != dw_form_t::DW_FORM_addr) error::send("Invalid form");
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
@@ -351,14 +352,14 @@ file_addr attr::as_address() const {
     return file_addr(elf, cur.get_u64());
 }
 
-std::uint32_t attr::as_section_offset() const {
+auto attr::as_section_offset() const -> std::uint32_t {
     if (form_ != dw_form_t::DW_FORM_sec_offset) error::send("Invalid form");
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     return cur.get_u32();
 }
 
-std::uint64_t attr::as_int() const {
+auto attr::as_int() const -> std::uint64_t {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     switch (form_) {
@@ -377,7 +378,7 @@ std::uint64_t attr::as_int() const {
     }
 }
 
-std::span<const std::byte> attr::as_block() const {
+auto attr::as_block() const -> std::span<const std::byte> {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     std::size_t size = 0;
@@ -400,7 +401,7 @@ std::span<const std::byte> attr::as_block() const {
     return {cur.data(), size};
 }
 
-die attr::as_reference() const {
+auto attr::as_reference() const -> die {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     std::size_t offset = 0;
@@ -427,7 +428,7 @@ die attr::as_reference() const {
             const std::byte* die_pos = debug_info_span.data() + offset;
 
             const auto& cus = cu_->dwarf_info().compile_units();
-            const auto& containing_cu = *std::ranges::find_if(cus, [&](const auto& cu) {
+            const auto& containing_cu = *std::ranges::find_if(cus, [&](const auto& cu) -> bool {
                 auto cu_span = cu->span();
                 return die_pos >= cu_span.data() && die_pos < cu_span.data() + cu_span.size();
             });
@@ -442,7 +443,7 @@ die attr::as_reference() const {
     return parse_die(*cu_, ref_cursor);
 }
 
-std::string_view xdb::attr::as_string() const {
+auto xdb::attr::as_string() const -> std::string_view {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     switch (form_) {
@@ -484,7 +485,7 @@ auto range_list::begin() const -> range_list::iterator { return {*cu_, data_, ba
 
 auto range_list::end() const -> range_list::iterator { return {}; }  // NOLINT
 
-[[nodiscard]] auto range_list::contains(file_addr addr) const -> bool {
+auto range_list::contains(file_addr addr) const -> bool {
     return std::ranges::any_of(*this, [addr](auto& entry) -> auto { return entry.contains(addr); });
 }
 
