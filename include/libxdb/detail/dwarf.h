@@ -479,6 +479,7 @@ enum {
     DW_LANG_UPC = 0x0012,
     DW_LANG_D = 0x0013,
     DW_LANG_Python = 0x0014,
+    DW_LANG_C_plus_plus_14 = 0x0021, /* ISO C++:2014 */
     DW_LANG_lo_user = 0x8000,
     DW_LANG_hi_user = 0xffff,
 };

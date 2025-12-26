@@ -1,5 +1,8 @@
-function(add_test_cpp_target target_name source_file)
-    add_executable(${target_name} ${source_file})
+function(add_test_cpp_target target_name)
+    # All arguments after target_name are source files
+    set(sources ${ARGN})
+
+    add_executable(${target_name} ${sources})
     target_compile_options(${target_name} PRIVATE -g -O0)
     target_link_options(${target_name} PRIVATE -pie)
     add_dependencies(tests ${target_name})
@@ -19,3 +22,4 @@ add_test_asm_target(reg_write reg_write.s)
 add_test_asm_target(reg_read reg_read.s)
 add_test_cpp_target(memory memory.cpp)
 add_test_cpp_target(anti_debugger anti_debugger.cpp)
+add_test_cpp_target(multi_cu multi_cu_main.cpp multi_cu_other.cpp)

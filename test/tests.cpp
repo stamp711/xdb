@@ -1,6 +1,7 @@
 #include <elf.h>
 #include <fcntl.h>
 #include <fmt/base.h>
+#include <libxdb/detail/dwarf.h>
 #include <sys/signal.h>
 
 #include <catch2/catch_test_macros.hpp>
@@ -605,4 +606,44 @@ TEST_CASE("ELF parser works", "[elf]") {
 
     // Verify both methods return the same symbol
     REQUIRE(elf.get_symbol_at_file_addr(entry_point_file_addr) == elf.get_symbol_at_virt_addr(entry_point_virt_addr));
+}
+
+TEST_CASE("DWARF language is correct", "[dwarf]") {
+    auto path = test_path() / "targets/hello";
+    xdb::elf elf(path);
+    const auto& cus = elf.get_dwarf().compile_units();
+    REQUIRE(cus.size() == 1);
+
+    REQUIRE(cus[0]->root()[dw_attr_type_t::DW_AT_language].as_int() == DW_LANG_C_plus_plus_14);
+}
+
+TEST_CASE("DWARF DIE iteration", "[dwarf]") {
+    auto path = test_path() / "targets/hello";
+    xdb::elf elf(path);
+    const auto& cus = elf.get_dwarf().compile_units();
+    REQUIRE(cus.size() == 1);
+
+    size_t count = 0;
+    for (const auto& die : cus[0]->root().children()) {
+        const auto& abbrev = die.abbreviation();
+        REQUIRE(abbrev.code != 0);
+        ++count;
+    }
+    REQUIRE(count > 0);
+}
+
+TEST_CASE("FInd main in multiple cus", "[dwarf]") {
+    auto path = test_path() / "targets/multi_cu";
+    xdb::elf elf(path);
+    const auto& cus = elf.get_dwarf().compile_units();
+    REQUIRE(cus.size() == 2);
+
+    auto results = elf.get_dwarf().find_functions("main");
+    REQUIRE(results.size() == 1);
+    REQUIRE(results[0].name().has_value());
+    REQUIRE(results[0].name().value() == "main");
+}
+
+TEST_CASE("Range list", "[dwarf]") {
+    // TODO
 }
