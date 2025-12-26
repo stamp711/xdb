@@ -180,6 +180,7 @@ class die {
 
     auto low_pc() const -> file_addr;
     auto high_pc() const -> file_addr;
+    auto contains_address(file_addr address) const -> bool;
 
     class children_range;
     auto children() const -> children_range;
@@ -310,8 +311,8 @@ class range_list::iterator {
     iterator(const iterator& other) = default;
     auto operator=(const iterator&) -> iterator& = default;
 
-    auto operator*() const -> reference;
-    auto operator->() const -> pointer;
+    auto operator*() const -> reference { return current_; }
+    auto operator->() const -> pointer { return &current_; }
 
     auto operator==(const iterator& other) const -> bool { return pos_ == other.pos_; }
     auto operator!=(const iterator& other) const -> bool { return pos_ != other.pos_; }

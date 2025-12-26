@@ -1,3 +1,5 @@
+#include <libxdb/detail/dwarf.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <iomanip>
@@ -83,6 +85,12 @@ class dwarf_dumper {
             case dw_form_t::DW_FORM_line_strp:
             case dw_form_t::DW_FORM_string: {
                 return std::string(attr.as_string());
+            }
+
+            case dw_form_t::DW_FORM_sec_offset: {
+                auto offset = attr.as_section_offset();
+                ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << offset;
+                return ss.str();
             }
 
             default: {

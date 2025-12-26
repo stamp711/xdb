@@ -112,6 +112,8 @@ enum class dw_attr_type_t : std::uint64_t {
     DW_AT_enum_class = 0x6d,
     DW_AT_linkage_name = 0x6e,
 
+    DW_AT_rnglists_base = 0x74,
+
     /* From DWARF5, but GCC still outputs in DWARF4 mode */
     DW_AT_defaulted = 0x8b,
 

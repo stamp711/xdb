@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <libxdb/dwarf.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
@@ -285,21 +286,58 @@ auto die::operator[](dw_attr_type_t att) const -> attr {
     error::send("Attribute not found");
 }
 
-auto die::low_pc() const -> file_addr { return (*this)[dw_attr_type_t::DW_AT_low_pc].as_address(); }
+auto die::low_pc() const -> file_addr {
+    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
+        return (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list().begin()->low;
+    }
+
+    if (this->contains(dw_attr_type_t::DW_AT_low_pc)) {
+        return (*this)[dw_attr_type_t::DW_AT_low_pc].as_address();
+    }
+
+    error::send("DIE does not contain DW_AT_low_pc or DW_AT_ranges");
+}
 
 auto die::high_pc() const -> file_addr {
-    auto attr = (*this)[dw_attr_type_t::DW_AT_high_pc];
-
-    // Per DWARF5.pdf, 2.17.2:
-    // If the value of the DW_AT_high_pc is of class address, it is the address of the first location past the last
-    // instruction associated with the entity; if it is of class constant, the value is an unsigned integer offset which
-    // when added to the low PC gives the address of the first location past the last instruction associated with the
-    // entity.
-
-    if (attr.form() == dw_form_t::DW_FORM_addr) {
-        return attr.as_address();
+    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
+        auto range_list = (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list();
+        auto it = range_list.begin();
+        while (std::next(it) != range_list.end()) ++it;
+        return it->high;  // high addr in last range
     }
-    return low_pc() + attr.as_int();
+
+    if (this->contains(dw_attr_type_t::DW_AT_high_pc)) {
+        auto attr = (*this)[dw_attr_type_t::DW_AT_high_pc];
+
+        // Per DWARF5.pdf, 2.17.2:
+        // If the value of the DW_AT_high_pc is of class address, it is the address of the first location past the last
+        // instruction associated with the entity; if it is of class constant, the value is an unsigned integer offset
+        // which when added to the low PC gives the address of the first location past the last instruction associated
+        // with the entity.
+
+        if (attr.form() == dw_form_t::DW_FORM_addr) {
+            return attr.as_address();
+        }
+        return low_pc() + attr.as_int();
+    }
+
+    error::send("DIE does not contain DW_AT_high_pc or DW_AT_ranges");
+}
+
+auto die::contains_address(file_addr address) const -> bool {
+    if (*address.elf_file() != this->cu_->dwarf_info().elf_file()) {
+        return false;
+    }
+
+    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
+        return (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list().contains(address);
+    }
+
+    if (this->contains(dw_attr_type_t::DW_AT_low_pc)) {
+        return this->low_pc() <= address && address < this->high_pc();
+    }
+
+    return false;
 }
 
 // ========== impl die::children_range && iterator ==========
@@ -466,12 +504,58 @@ auto xdb::attr::as_string() const -> std::string_view {
     }
 }
 
-auto xdb::attr::as_range_list() const -> xdb::range_list {  // TODO: DW_AT_rnglists_base & DW_FORM_rnglistx
-    // get data range from .debug_ranges
-    auto section = cu_->dwarf_info().elf_file().get_section_contents(".debug_ranges");
-    auto offset = as_section_offset();
+auto xdb::attr::as_range_list() const -> xdb::range_list {
+    // Per DWARF5.pdf, Page 216, get data range from .debug_rnglists
+    auto section = cu_->dwarf_info().elf_file().get_section_contents(".debug_rnglists");
+    cursor cur(section);
+
+    std::uint32_t offset = 0;
+    switch (form_) {
+        case dw_form_t::DW_FORM_sec_offset: {
+            offset = as_section_offset();
+            break;
+        }
+
+        case dw_form_t::DW_FORM_rnglistx: {
+            // See Range List Table spec: DWARF5.pdf, Page 242
+
+            // P.216, this is an unsigned ULEB
+            auto index = cursor({location_, cu_->span().end().base()}).get_uleb128();
+
+            // Seek to offsets table base of this cu.
+            // P.66:
+            // A DW_AT_rnglists_base attribute, whose value is of class rnglistsptr. This
+            // attribute points to the beginning of the offsets table (immediately following
+            // the header) of the compilation unit’s contribution to the .debug_rnglists
+            // section. References to range lists (using DW_FORM_rnglistx) within the
+            // compilation unit are interpreted relative to this base.
+            auto rnglists_base = cu_->root()[dw_attr_type_t::DW_AT_rnglists_base].as_section_offset();
+            cur += rnglists_base;
+
+            // P.198: In the body of the .debug_loclists and .debug_rnglists sections, the
+            // offsets the follow the header depend on the DWARF format as follows: in the
+            // 32-bit DWARF format, offsets are 4-byte unsigned integer values; in the 64-bit
+            // DWARF format, they are 8-byte unsigned integers.
+            cur += index * 4;
+
+            // P.242: The contents of the i-th offset is the offset (an unsigned integer) from the
+            // beginning of the offset array to the location of the ith range list.
+            //
+            // P.243: The DW_AT_rnglists_base attribute points to the first offset following the header.
+            offset = rnglists_base + cur.get_u32();
+
+            break;
+        }
+
+        default:
+            error::send("Invalid range list form");
+    }
+
     std::span<const std::byte> data(section.begin() + offset, section.end());
 
+    // Per DWARF5.pdf P.53:
+    // ... If there is no preceding base address entry, then the applicable base address defaults to the base address of
+    // the compilation unit.
     auto root = cu_->root();
     file_addr base_address =
         root.contains(dw_attr_type_t::DW_AT_low_pc) ? root[dw_attr_type_t::DW_AT_low_pc].as_address() : file_addr{};
@@ -486,7 +570,7 @@ auto range_list::begin() const -> range_list::iterator { return {*cu_, data_, ba
 auto range_list::end() const -> range_list::iterator { return {}; }  // NOLINT
 
 auto range_list::contains(file_addr addr) const -> bool {
-    return std::ranges::any_of(*this, [addr](auto& entry) -> auto { return entry.contains(addr); });
+    return std::ranges::any_of(*this, [addr](auto& ent) -> auto { return ent.contains(addr); });
 }
 
 range_list::iterator::iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address)
@@ -495,14 +579,14 @@ range_list::iterator::iterator(const compile_unit& cu, std::span<const std::byte
 }
 
 auto range_list::iterator::operator++() -> range_list::iterator& {
-    // In DWARF 5, this is very different than in DWARF 4
-
     const auto& elf = cu_->dwarf_info().elf_file();
-
     cursor cur({pos_, data_.end().base()});
 
     bool yield = false;
     while (!yield) {
+        // Per DWARF5.pdf P. 53:
+        // Each range list entry begins with a single byte identifying the kind of that entry, followed by zero or more
+        // operands depending on the kind.
         auto kind = cur.get_u8();
         switch (kind) {
             case DW_RLE_end_of_list: {

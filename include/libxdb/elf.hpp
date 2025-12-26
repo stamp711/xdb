@@ -24,6 +24,8 @@ class elf {
     elf& operator=(const elf&) = delete;
     elf& operator=(elf&&) = delete;
 
+    auto operator==(const elf& other) const noexcept -> bool { return path_ == other.path_ && data_ == other.data_; }
+
     [[nodiscard]] std::filesystem::path path() const noexcept { return path_; }
     [[nodiscard]] const Elf64_Ehdr& header() const noexcept { return header_; }
 
