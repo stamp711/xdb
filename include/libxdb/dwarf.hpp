@@ -22,6 +22,7 @@ class elf;
 class die;
 class compile_unit;
 class attr;
+class range_list;
 
 struct attr_spec {
     dw_attr_type_t type;
@@ -239,9 +240,7 @@ class die::children_range {
     die die_;
 };
 
-template <dw_form_t Form>
-struct form_type;
-
+class range_list;
 class attr {
    public:
     attr() = delete;
@@ -257,6 +256,7 @@ class attr {
     [[nodiscard]] std::uint64_t as_int() const;
     [[nodiscard]] std::string_view as_string() const;
     [[nodiscard]] die as_reference() const;
+    [[nodiscard]] auto as_range_list() const -> range_list;
 
    private:
     dw_attr_type_t type_;
@@ -264,6 +264,70 @@ class attr {
     const std::byte* location_;
     const compile_unit* cu_;
     // const die* die_;  // We don't store die_ because there's no storage for them in dwarf, easy to use-after-free
+};
+
+/* ========== range list related ========== */
+
+class range_list {
+   public:
+    range_list(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address)
+        : cu_(&cu), data_(data), base_address_(base_address) {}
+
+    struct entry {
+        file_addr low;
+        file_addr high;
+        [[nodiscard]] auto contains(file_addr addr) const -> bool { return low <= addr && addr < high; }
+    };
+
+    class iterator;
+    [[nodiscard]] auto begin() const -> iterator;
+    [[nodiscard]] auto end() const -> iterator;
+
+    [[nodiscard]] auto contains(file_addr addr) const -> bool;
+
+   private:
+    const compile_unit* cu_;  // always valid
+    std::span<const std::byte> data_;
+    file_addr base_address_;
+};
+
+class range_list::iterator {
+   public:
+    using value_type = entry;
+    using difference_type = std::ptrdiff_t;
+    using pointer = const entry*;
+    using reference = const entry&;
+    using iterator_category = std::forward_iterator_tag;
+
+    iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address);
+
+    ~iterator() = default;
+
+    iterator() = default;
+    iterator(iterator&&) = default;
+    auto operator=(iterator&&) -> iterator& = default;
+    iterator(const iterator& other) = default;
+    auto operator=(const iterator&) -> iterator& = default;
+
+    [[nodiscard]] auto operator*() const -> reference;
+    [[nodiscard]] auto operator->() const -> pointer;
+
+    [[nodiscard]] auto operator==(const iterator& other) const -> bool { return pos_ == other.pos_; }
+    [[nodiscard]] auto operator!=(const iterator& other) const -> bool { return pos_ != other.pos_; }
+
+    auto operator++() -> iterator&;
+    auto operator++(int) -> iterator {
+        auto tmp = *this;
+        ++(*this);
+        return tmp;
+    }
+
+   private:
+    const compile_unit* cu_ = nullptr;
+    std::span<const std::byte> data_;
+    file_addr base_address_;
+    const std::byte* pos_ = nullptr;
+    entry current_;
 };
 
 }  // namespace xdb

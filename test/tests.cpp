@@ -529,7 +529,7 @@ TEST_CASE("Syscall catchpoints", "[catchpoint]") {
     auto proc = xdb::process::launch(test_path() / "targets/anti_debugger", true, dev_null);
 
     auto write_syscall = xdb::syscall_name_to_id("write");
-    auto policy = xdb::syscall_catch_policy::catch_some({write_syscall});
+    auto policy = xdb::syscall_catch_policy::catch_some(std::vector{write_syscall});
     proc->set_syscall_catch_policy(policy);
 
     proc->resume();

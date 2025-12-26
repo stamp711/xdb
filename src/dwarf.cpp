@@ -1,3 +1,4 @@
+// #include <dwarf.h>
 #include <libxdb/detail/dwarf.h>
 
 #include <algorithm>
@@ -5,6 +6,7 @@
 #include <libxdb/dwarf.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
+#include <libxdb/types.hpp>
 #include <memory>
 
 namespace {
@@ -62,7 +64,10 @@ std::unique_ptr<xdb::compile_unit> parse_compile_unit(xdb::dwarf& dwarf, xdb::cu
     }
 
     auto address_size = cursor.get_u8();
-    (void)address_size;
+    if (address_size != 8) {
+        xdb::error::send("Only 64-bit addresses are supported");
+    }
+
     auto debug_abbrev_offset = cursor.get_u32();
 
     std::span<const std::byte> span = {start, sizeof(unit_length) + unit_length};
@@ -115,6 +120,8 @@ xdb::die parse_die(const xdb::compile_unit& cu, xdb::cursor cur) {
 }  // namespace
 
 namespace xdb {
+
+// ========== impl cursor ==========
 
 void cursor::skip_form(dw_form_t form) {
     switch (form) {
@@ -229,6 +236,8 @@ void cursor::skip_form(dw_form_t form) {
     error::send("Unrecognized DWARF form");
 }
 
+// ========== impl dwarf ==========
+
 dwarf::dwarf(const elf& parent_elf) : elf_(&parent_elf) {
     debug_info_span_ = elf_->get_section_contents(".debug_info");
     compile_units_ = parse_compile_units(*this, debug_info_span_);
@@ -244,11 +253,15 @@ const std::unordered_map<std::uint64_t, abbrev>& dwarf::get_abbrev_table(std::si
     return *abbrev_table_cache_.at(byte_offset);
 }
 
+// ========== impl compile_unit ==========
+
 die compile_unit::root() const {
     constexpr auto cu_header_size = 12;  // For 32-bit DWARF 5, see parse_compile_unit()
     cursor cur({span_.begin() + cu_header_size, span_.end()});
     return parse_die(*this, cur);
 }
+
+// ========== impl die ==========
 
 std::span<const std::byte> die::next_die_parse_span() const {
     const auto* start = next_;
@@ -288,6 +301,8 @@ attr die::operator[](dw_attr_type_t attr) const {
     return low_pc() + attr.as_int();
 }
 
+// ========== impl die::children_range && iterator ==========
+
 die::children_range die::children() const { return die::children_range(*this); }
 
 die::children_range::iterator::iterator(const die& die) {
@@ -325,6 +340,8 @@ bool die::children_range::iterator::operator==(const iterator& other) const {
     // Both are not null
     return die_->span_.data() == other.die_->span_.data();
 }
+
+// ========== impl attr ==========
 
 file_addr attr::as_address() const {
     if (form_ != dw_form_t::DW_FORM_addr) error::send("Invalid form");
@@ -446,6 +463,109 @@ std::string_view xdb::attr::as_string() const {
         default:
             error::send("Invalid string form");
     }
+}
+
+auto xdb::attr::as_range_list() const -> xdb::range_list {  // TODO: DW_AT_rnglists_base & DW_FORM_rnglistx
+    // get data range from .debug_ranges
+    auto section = cu_->dwarf_info().elf_file().get_section_contents(".debug_ranges");
+    auto offset = as_section_offset();
+    std::span<const std::byte> data(section.begin() + offset, section.end());
+
+    auto root = cu_->root();
+    file_addr base_address =
+        root.contains(dw_attr_type_t::DW_AT_low_pc) ? root[dw_attr_type_t::DW_AT_low_pc].as_address() : file_addr{};
+
+    return {*cu_, data, base_address};
+}
+
+// ========== impl range_list && iterator ==========
+
+auto range_list::begin() const -> range_list::iterator { return {*cu_, data_, base_address_}; }
+
+auto range_list::end() const -> range_list::iterator { return {}; }  // NOLINT
+
+[[nodiscard]] auto range_list::contains(file_addr addr) const -> bool {
+    return std::ranges::any_of(*this, [addr](auto& entry) -> auto { return entry.contains(addr); });
+}
+
+range_list::iterator::iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address)
+    : cu_(&cu), data_(data), base_address_(base_address) {
+    ++(*this);
+}
+
+auto range_list::iterator::operator++() -> range_list::iterator& {
+    // In DWARF 5, this is very different than in DWARF 4
+
+    const auto& elf = cu_->dwarf_info().elf_file();
+
+    cursor cur({pos_, data_.end().base()});
+
+    bool yield = false;
+    while (!yield) {
+        auto kind = cur.get_u8();
+        switch (kind) {
+            case DW_RLE_end_of_list: {
+                pos_ = nullptr;  // matches end() and operator==()
+                yield = true;
+                break;
+            }
+
+            case DW_RLE_base_addressx: {
+                // ULEB128 index into .debug_addr
+                xdb::error::send("DW_RLE_base_addressx unimplemented");  // TODO
+                yield = false;
+                break;
+            }
+
+            case DW_RLE_startx_endx: {
+                // 2 ULEB128 indexes into .debug_addr
+                xdb::error::send("DW_RLE_startx_endx unimplemented");  // TODO
+                yield = false;
+                break;
+            }
+
+            case DW_RLE_startx_length: {
+                // 2 ULEB operands: 1. index into .debug_addr, 2. length of the range
+                xdb::error::send("DW_RLE_startx_length unimplemented");  // TODO
+                yield = false;
+                break;
+            }
+
+            case DW_RLE_offset_pair: {
+                current_.low = base_address_ + cur.get_uleb128();
+                current_.high = base_address_ + cur.get_uleb128();
+                yield = true;
+                break;
+            }
+
+            case DW_RLE_base_address: {
+                base_address_ = file_addr(elf, cur.get_u64());
+                yield = false;
+                break;
+            }
+
+            case DW_RLE_start_end: {
+                current_.low = file_addr(elf, cur.get_u64());
+                current_.high = file_addr(elf, cur.get_u64());
+                yield = true;
+                break;
+            }
+
+            case DW_RLE_start_length: {
+                current_.low = base_address_ + cur.get_u64();
+                current_.high = current_.low + cur.get_uleb128();
+                yield = true;
+                break;
+            }
+
+            default: {
+                xdb::error::send("unknown range list entry kind");
+                break;
+            }
+        }
+    }
+
+    return *this;
 }
 
 }  // namespace xdb

@@ -34,6 +34,7 @@ class file_offset {
 class file_addr {
    public:
     explicit file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
+    file_addr() = default;
 
     [[nodiscard]] std::uint64_t addr() const noexcept { return addr_; }
     [[nodiscard]] const elf* elf_file() const noexcept { return elf_; }
@@ -59,7 +60,7 @@ class file_addr {
 
    private:
     const elf* elf_ = nullptr;
-    std::uint64_t addr_;
+    std::uint64_t addr_ = 0;
 };
 
 // Actual virtual address in the running process

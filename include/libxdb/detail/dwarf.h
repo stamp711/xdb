@@ -603,4 +603,15 @@ enum {
     DW_EH_PE_indirect = 0x80,
 };
 
+enum {
+    DW_RLE_end_of_list = 0x0,
+    DW_RLE_base_addressx = 0x1,
+    DW_RLE_startx_endx = 0x2,
+    DW_RLE_startx_length = 0x3,
+    DW_RLE_offset_pair = 0x4,
+    DW_RLE_base_address = 0x5,
+    DW_RLE_start_end = 0x6,
+    DW_RLE_start_length = 0x7
+};
+
 // NOLINTEND
