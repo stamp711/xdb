@@ -70,6 +70,8 @@ elf::elf(std::filesystem::path path) : path_(std::move(path)) {
     parse_symbol_table_();
     build_symbol_maps_();
 
+    dwarf_ = std::make_unique<dwarf>(*this);
+
     // Dismiss the scope guards, the destructor will handle them
     guard_fd.dismiss();
     guard_mmap.dismiss();

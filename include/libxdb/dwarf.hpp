@@ -11,6 +11,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <unordered_map>
 #include <utility>
@@ -124,12 +125,21 @@ class dwarf {
     auto get_abbrev_table(std::size_t byte_offset) -> const std::unordered_map<std::uint64_t, abbrev>&;
     auto compile_units() const -> const std::vector<std::unique_ptr<compile_unit>>& { return compile_units_; }
 
+    auto compile_unit_containing_address(file_addr address) const -> const compile_unit*;
+    auto function_containing_address(file_addr address) const -> std::optional<die>;  // Be aware of lifetimes!
+    auto find_functions(const std::string& name) const -> std::vector<die>;           // Be aware of lifetimes!
+
    private:
     const elf* elf_;
     std::span<const std::byte> debug_info_span_;
     std::unordered_map<std::size_t, std::unique_ptr<const std::unordered_map<std::uint64_t, abbrev>>>
         abbrev_table_cache_;
     std::vector<std::unique_ptr<compile_unit>> compile_units_;
+
+    mutable std::unordered_multimap<std::string, const die> function_index_;
+
+    auto index_() const -> void;  // index all DIEs
+    auto index_die_(const die& die) const -> void;
 };
 
 class compile_unit {
@@ -174,6 +184,8 @@ class die {
         return static_cast<std::size_t>(span_.data() - cu_->dwarf_info().debug_info().data());
     }
 
+    auto cu() const -> const compile_unit& { return *cu_; }
+
     auto contains(dw_attr_type_t attr) const -> bool;
     auto operator[](dw_attr_type_t attr) const -> class attr;
     auto abbreviation() const -> const abbrev& { return *abbrev_; }
@@ -184,6 +196,8 @@ class die {
 
     class children_range;
     auto children() const -> children_range;
+
+    auto name() const -> std::optional<std::string_view>;
 
    private:
     explicit die(const compile_unit* cu, const std::byte* next, std::span<const std::byte> span, const abbrev* abbrev,

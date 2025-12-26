@@ -268,10 +268,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    xdb::elf elf_file(binary_path);
-    xdb::dwarf dwarf_info(elf_file);
+    xdb::elf elf(binary_path);
 
-    dwarf_dumper dumper(elf_file, dwarf_info);
+    dwarf_dumper dumper(elf, elf.get_dwarf());
     dumper.dump_all();
 
     return 0;

@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <deque>
 #include <filesystem>
+#include <libxdb/dwarf.hpp>
 #include <libxdb/types.hpp>
 #include <map>
 #include <span>
@@ -48,6 +49,9 @@ class elf {
     auto get_symbol_at_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym*;
     auto get_symbol_containing_file_addr(file_addr file_addr) const -> const Elf64_Sym*;
     auto get_symbol_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym*;
+
+    auto get_dwarf() -> dwarf& { return *dwarf_; }
+    auto get_dwarf() const -> const dwarf& { return *dwarf_; }
 
    private:
     void assert_load_bias_set_() const;
@@ -93,6 +97,8 @@ class elf {
         symbol_addr_map_;  // addr range -> symbol
 
     virt_addr load_bias_{0};
+
+    std::unique_ptr<dwarf> dwarf_;
 };
 
 }  // namespace xdb

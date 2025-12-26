@@ -9,6 +9,8 @@
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
+#include <ranges>
+#include <string_view>
 
 namespace {
 
@@ -255,6 +257,57 @@ auto dwarf::get_abbrev_table(std::size_t byte_offset) -> const std::unordered_ma
     return *abbrev_table_cache_.at(byte_offset);
 }
 
+auto dwarf::compile_unit_containing_address(file_addr address) const -> const compile_unit* {
+    for (const auto& cu : compile_units_) {
+        if (cu->root().contains_address(address)) {
+            return cu.get();
+        }
+    }
+    return nullptr;
+}
+
+auto dwarf::function_containing_address(file_addr address) const -> std::optional<die> {
+    index_();
+    for (const auto& [_name, die] : function_index_) {
+        if (die.contains_address(address) && die.abbreviation().tag == dw_tag_t::DW_TAG_subprogram) {
+            return die;
+        }
+    }
+    return std::nullopt;
+}
+
+auto dwarf::find_functions(const std::string& name) const -> std::vector<die> {
+    index_();
+    std::vector<die> res;
+    auto [begin, end] = function_index_.equal_range(name);
+    for (auto& [_name, die] : std::ranges::subrange(begin, end)) {
+        res.push_back(die);
+    }
+    return res;
+}
+
+auto dwarf::index_() const -> void {
+    if (!function_index_.empty()) return;
+    for (const auto& cu : compile_units_) {
+        index_die_(cu->root());
+    }
+}
+
+auto dwarf::index_die_(const die& die) const -> void {
+    bool is_function = die.abbreviation().tag == dw_tag_t::DW_TAG_subprogram ||
+                       die.abbreviation().tag == dw_tag_t::DW_TAG_inlined_subroutine;
+    bool has_range = die.contains(dw_attr_type_t::DW_AT_low_pc) && die.contains(dw_attr_type_t::DW_AT_high_pc);
+
+    if (is_function && has_range) {
+        auto name = die.name();
+        if (name) function_index_.emplace(*name, die);
+    }
+
+    for (const auto& child : die.children()) {
+        index_die_(child);
+    }
+}
+
 // ========== impl compile_unit ==========
 
 auto compile_unit::root() const -> die {
@@ -340,9 +393,29 @@ auto die::contains_address(file_addr address) const -> bool {
     return false;
 }
 
-// ========== impl die::children_range && iterator ==========
-
 auto die::children() const -> die::children_range { return die::children_range(*this); }
+
+auto die::name() const -> std::optional<std::string_view> {
+    // Most function DIEs encode the name of the function as a DW_AT_name attribute, but two special types of function
+    // encode the name indirectly. DIEs that represent out-of-line definitions (which occur, for example, when we
+    // declare a member function in a header file and define it in a source file) contain a DW_AT_specification
+    // attribute that points to the DIE representing the original declaration. Also, inlined functions (those whose body
+    // the compiler has copy-pasted into the body of another function) contain a DW_AT_abstract_origin attribute that
+    // points to the DIE representing the copied function.
+
+    if (this->contains(dw_attr_type_t::DW_AT_name)) {
+        return (*this)[dw_attr_type_t::DW_AT_name].as_string();
+    }
+    if (this->contains(dw_attr_type_t::DW_AT_specification)) {
+        return (*this)[dw_attr_type_t::DW_AT_specification].as_reference().name();
+    }
+    if (this->contains(dw_attr_type_t::DW_AT_abstract_origin)) {
+        return (*this)[dw_attr_type_t::DW_AT_abstract_origin].as_reference().name();
+    }
+    return std::nullopt;
+}
+
+// ========== impl die::children_range && iterator ==========
 
 die::children_range::iterator::iterator(const die& die) {
     cursor next_cur({die.next_die_parse_span()});
