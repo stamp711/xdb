@@ -34,8 +34,6 @@ pkg_check_modules(libedit REQUIRED IMPORTED_TARGET libedit)
 find_package(fmt CONFIG REQUIRED)
 find_package(Zydis CONFIG REQUIRED)
 
-include(CTest)
-
 add_subdirectory(src)
 add_subdirectory(tools)
 

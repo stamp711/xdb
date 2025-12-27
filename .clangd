@@ -11,12 +11,14 @@ Diagnostics:
       cppcoreguidelines-*,
     ]
     Remove: [
+      bugprone-easily-swappable-parameters,
       cppcoreguidelines-avoid-magic-numbers,
       cppcoreguidelines-pro-bounds-pointer-arithmetic,
       cppcoreguidelines-pro-type-reinterpret-cast,
       cppcoreguidelines-pro-type-vararg,
       modernize-use-nodiscard,
       readability-convert-member-functions-to-static,
+      readability-function-cognitive-complexity,
       readability-identifier-length,
       readability-magic-numbers,
     ]

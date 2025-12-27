@@ -1,16 +1,22 @@
 // #include <dwarf.h>
+#include <fmt/format.h>
 #include <libxdb/detail/dwarf.h>
 
 #include <algorithm>
 #include <cstddef>
+#include <filesystem>
 #include <iterator>
 #include <libxdb/dwarf.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
+#include <magic_enum/magic_enum.hpp>
 #include <memory>
 #include <ranges>
+#include <string>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -29,11 +35,11 @@ auto parse_abbrev_table(const xdb::elf& elf, std::size_t byte_offset)
         auto has_children = static_cast<bool>(cur.get_u8());  // encoded as u8
         std::vector<xdb::attr_spec> attrs;
         while (true) {
-            auto attr_type = dw_attr_type_t{cur.get_uleb128()};
-            auto attr_form = dw_form_t{cur.get_uleb128()};
-            if (attr_type == dw_attr_type_t::DW_AT_end) break;  // {0, 0} marks end of the attributes
+            auto attr_type = cur.get_uleb128();
+            auto attr_form = cur.get_uleb128();
+            if (attr_type == 0) break;  // {0, 0} marks end of the attributes
 
-            if (attr_form == dw_form_t::DW_FORM_implicit_const) {
+            if (attr_form == DW_FORM_implicit_const) {
                 // There's a implicit constant value in SLEB128 format
                 auto value = cur.get_sleb128();
                 attrs.push_back({attr_type, attr_form, value});
@@ -41,7 +47,7 @@ auto parse_abbrev_table(const xdb::elf& elf, std::size_t byte_offset)
                 attrs.push_back({attr_type, attr_form, 0});
             }
         }
-        xdb::abbrev entry{.code = code, .tag = dw_tag_t{tag}, .has_children = has_children, .attrs = std::move(attrs)};
+        xdb::abbrev entry{.code = code, .tag = tag, .has_children = has_children, .attrs = std::move(attrs)};
         abbrev_table.emplace(code, entry);
     }
 
@@ -90,6 +96,199 @@ auto parse_compile_units(xdb::dwarf& dwarf, std::span<const std::byte> debug_inf
     return compile_units;
 }
 
+auto parse_line_table(const xdb::compile_unit& cu) -> std::unique_ptr<xdb::line_table> {
+    if (!cu.root().contains(DW_AT_stmt_list)) return nullptr;
+    auto offset = cu.root()[DW_AT_stmt_list].as_section_offset();
+
+    auto debug_line = cu.dwarf_info().elf_file().get_section_contents(".debug_line");
+    xdb::cursor cur({debug_line.begin() + offset, debug_line.end()});
+
+    // P.154: Line Number Program header format
+    auto unit_length = cur.get_u32();
+    if (unit_length >= 0xfffffff0) xdb::error::send("Initial Length extension value is not supported");
+    const auto* end = cur.data() + unit_length;  // not including the length field itself
+
+    auto version = cur.get_u16();
+    if (version != 5) xdb::error::send("Only version 5 is supported");
+
+    auto address_size = cur.get_u8();
+    if (address_size != 8) xdb::error::send("Unsupported address_size");
+
+    auto segment_selector_size = cur.get_u8();
+    if (segment_selector_size != 0) xdb::error::send("Unsupported segment_selector_size");
+
+    [[maybe_unused]]
+    auto header_length = cur.get_u32();
+
+    auto minimum_instruction_length = cur.get_u8();
+    if (minimum_instruction_length != 1) xdb::error::send("Unexpected minimum_instruction_length");
+
+    auto maximum_operations_per_instruction = cur.get_u8();
+    if (maximum_operations_per_instruction != 1) xdb::error::send("Unexpected maximum_operations_per_instruction");
+
+    auto default_is_stmt = cur.get_u8();
+    auto line_base = cur.get_i8();
+    auto line_range = cur.get_u8();
+    auto opcode_base = cur.get_u8();
+
+    // P.162: Standard Opcodes
+    auto expected_opcode_lengths = std::unordered_map<DW_LNS, uint8_t>{{DW_LNS_copy, 0},
+                                                                       {DW_LNS_advance_pc, 1},
+                                                                       {DW_LNS_advance_line, 1},
+                                                                       {DW_LNS_set_file, 1},
+                                                                       {DW_LNS_set_column, 1},
+                                                                       {DW_LNS_negate_stmt, 0},
+                                                                       {DW_LNS_set_basic_block, 0},
+                                                                       {DW_LNS_const_add_pc, 0},
+                                                                       {DW_LNS_fixed_advance_pc, 1},
+                                                                       {DW_LNS_set_prologue_end, 0},
+                                                                       {DW_LNS_set_epilogue_begin, 0},
+                                                                       {DW_LNS_set_isa, 1}};
+    for (auto i = 1; i < opcode_base; ++i) {  // It may only use a subset of standard opcodes
+        if (cur.get_u8() != expected_opcode_lengths[static_cast<DW_LNS>(i)]) {
+            xdb::error::send("Unexpected standard opcode length");
+        }
+    }
+
+    std::vector<std::filesystem::path> dirs;
+    {
+        // directory_entry_format
+        //
+        // A sequence of directory entry format descriptions. Each description consists of a pair of ULEB128 values:
+        // - A content type code (see Sections 6.2.4.1 on page 158 and 6.2.4.2 on page 159).
+        // - A form code using the attribute form codes
+        auto directory_entry_format_count = cur.get_u8();
+
+        std::vector<std::pair<DW_LNCT, DW_FORM>> dir_format;
+        for (auto i = 0; i < directory_entry_format_count; ++i) {
+            auto content_type = static_cast<DW_LNCT>(cur.get_uleb128());
+            auto form = static_cast<DW_FORM>(cur.get_uleb128());
+            dir_format.emplace_back(content_type, form);
+        }
+
+        // directories
+        //
+        // A sequence of directory names and optional related information. Each entry
+        // is encoded as described by the directory_entry_format field.
+        //
+        // The first entry is the current directory of the compilation. Each additional
+        // path entry is either a full path name or is relative to the current directory of
+        // the compilation.
+        //
+        // The line number program assigns a number (index) to each of the directory
+        // entries in order, beginning with 0.
+        //
+        // Prior to DWARF Version 5, the current directory was not represented in the
+        // directories field and a directory index of 0 implicitly referred to that directory as found
+        // in the DW_AT_comp_dir attribute of the compilation unit debugging information
+        // entry. In DWARF Version 5, the current directory is explicitly present in the
+        // directories field. This is needed to support the common practice of stripping all but
+        // the line number sections (.debug_line and .debug_line_str) from an executable.
+        auto directories_count = cur.get_uleb128();
+        for (size_t i = 0; i < directories_count; ++i) {
+            std::filesystem::path path;
+
+            // Extract dir path
+            for (auto [content_type, form] : dir_format) {
+                // P.158: Standard & Vecdor-defined Content Descriptions
+                if (content_type == DW_LNCT_path) {
+                    path = xdb::attr(0, form, cur.data(), cu).as_string();  // TODO: shouldn't use fake attr
+                    cur.skip_form(form);
+                } else {
+                    cur.skip_form(form);
+                    // skip, we only care about path for now
+                }
+            }
+
+            if (path.empty()) {
+                xdb::error::send("Directory is empty");
+            }
+            if (path.is_absolute()) {
+                dirs.emplace_back(path);
+            } else {
+                // relative path
+                dirs.push_back(dirs[0] / path);
+            }
+        }
+    }
+
+    std::vector<xdb::line_table::file> files;
+    {
+        auto file_name_entry_format_count = cur.get_u8();
+        std::vector<std::pair<DW_LNCT, DW_FORM>> file_format;
+        for (auto i = 0; i < file_name_entry_format_count; ++i) {
+            auto content_type = static_cast<DW_LNCT>(cur.get_uleb128());
+            auto form = static_cast<DW_FORM>(cur.get_uleb128());
+            file_format.emplace_back(content_type, form);
+        }
+
+        // file_names
+        //
+        // A sequence of file names and optional related information. Each entry is
+        // encoded as described by the file_name_entry_format field.
+        //
+        // Entries in this sequence describe source files that contribute to the line
+        // number information for this compilation or is used in other contexts, such as
+        // in a declaration coordinate or a macro file inclusion.
+        //
+        // The first entry in the sequence is the primary source file whose file name
+        // exactly matches that given in the DW_AT_name attribute in the compilation
+        // unit debugging information entry.
+        //
+        // The line number program references file names in this sequence beginning
+        // with 0, and uses those numbers instead of file names in the line number
+        // program that follows.
+        //
+        // Prior to DWARF Version 5, the current compilation file name was not represented in
+        // the file_names field. In DWARF Version 5, the current compilation file name is
+        // explicitly present and has index 0. This is needed to support the common practice of
+        // stripping all but the line number sections (.debug_line and .debug_line_str)
+        // from an executable.
+        auto files_count = cur.get_uleb128();
+        for (size_t i = 0; i < files_count; ++i) {
+            xdb::line_table::file file;
+
+            for (auto [content_type, form] : file_format) {
+                switch (content_type) {
+                    case DW_LNCT_path: {
+                        file.path = xdb::attr(0, form, cur.data(), cu).as_string();  // TODO: shouldn't use fake attr
+                        cur.skip_form(form);
+                        break;
+                    }
+                    case DW_LNCT_directory_index: {
+                        file.directory_index = xdb::attr(0, form, cur.data(), cu).as_int();
+                        cur.skip_form(form);
+                        break;
+                    }
+                    case DW_LNCT_timestamp: {
+                        // TODO: may not parse DW_FORM_block
+                        file.timestamp = xdb::attr(0, form, cur.data(), cu).as_int();
+                        cur.skip_form(form);
+                        break;
+                    }
+                    case DW_LNCT_size: {
+                        file.size = xdb::attr(0, form, cur.data(), cu).as_int();
+                        cur.skip_form(form);
+                        break;
+                    }
+                    default: {
+                        cur.skip_form(form);
+                        break;
+                    }
+                }
+            }
+
+            if (file.path.is_relative()) {
+                file.path = dirs[file.directory_index] / file.path;
+            }
+        }
+    }
+
+    auto data = std::span<const std::byte>(cur.data(), end);
+    return std::make_unique<xdb::line_table>(data, cu, default_is_stmt, line_base, line_range, opcode_base,
+                                             std::move(dirs), std::move(files));
+}
+
 auto parse_die(const xdb::compile_unit& cu, xdb::cursor cur) -> xdb::die {
     const auto* start = cur.data();
 
@@ -127,112 +326,112 @@ namespace xdb {
 
 // ========== impl cursor ==========
 
-void cursor::skip_form(dw_form_t form) {
+void cursor::skip_form(uint64_t form) {
     switch (form) {
         // Special cases - no bytes to skip
-        case dw_form_t::DW_FORM_flag_present:
-        case dw_form_t::DW_FORM_implicit_const:  // DWARF 5
+        case DW_FORM_flag_present:
+        case DW_FORM_implicit_const:  // DWARF 5
             return;
 
         // Host address size dependent (8 bytes)
-        case dw_form_t::DW_FORM_addr:
+        case DW_FORM_addr:
             *this += 8;
             return;
 
         // DWARF format size dependent (4 bytes for 32-bit DWARF)
-        case dw_form_t::DW_FORM_ref_addr:
-        case dw_form_t::DW_FORM_sec_offset:
-        case dw_form_t::DW_FORM_strp:
-        case dw_form_t::DW_FORM_strp_sup:   // DWARF 5
-        case dw_form_t::DW_FORM_line_strp:  // DWARF 5
+        case DW_FORM_ref_addr:
+        case DW_FORM_sec_offset:
+        case DW_FORM_strp:
+        case DW_FORM_strp_sup:   // DWARF 5
+        case DW_FORM_line_strp:  // DWARF 5
             *this += 4;
             return;
 
         // 1-byte fixed size
-        case dw_form_t::DW_FORM_data1:
-        case dw_form_t::DW_FORM_flag:
-        case dw_form_t::DW_FORM_ref1:
-        case dw_form_t::DW_FORM_addrx1:  // DWARF 5
-        case dw_form_t::DW_FORM_strx1:   // DWARF 5
+        case DW_FORM_data1:
+        case DW_FORM_flag:
+        case DW_FORM_ref1:
+        case DW_FORM_addrx1:  // DWARF 5
+        case DW_FORM_strx1:   // DWARF 5
             *this += 1;
             return;
 
         // 2-byte fixed size
-        case dw_form_t::DW_FORM_data2:
-        case dw_form_t::DW_FORM_ref2:
-        case dw_form_t::DW_FORM_addrx2:  // DWARF 5
-        case dw_form_t::DW_FORM_strx2:   // DWARF 5
+        case DW_FORM_data2:
+        case DW_FORM_ref2:
+        case DW_FORM_addrx2:  // DWARF 5
+        case DW_FORM_strx2:   // DWARF 5
             *this += 2;
             return;
 
         // 3-byte fixed size
-        case dw_form_t::DW_FORM_addrx3:  // DWARF 5
-        case dw_form_t::DW_FORM_strx3:   // DWARF 5
+        case DW_FORM_addrx3:  // DWARF 5
+        case DW_FORM_strx3:   // DWARF 5
             *this += 3;
             return;
 
         // 4-byte fixed size
-        case dw_form_t::DW_FORM_data4:
-        case dw_form_t::DW_FORM_ref4:
-        case dw_form_t::DW_FORM_addrx4:    // DWARF 5
-        case dw_form_t::DW_FORM_strx4:     // DWARF 5
-        case dw_form_t::DW_FORM_ref_sup4:  // DWARF 5
+        case DW_FORM_data4:
+        case DW_FORM_ref4:
+        case DW_FORM_addrx4:    // DWARF 5
+        case DW_FORM_strx4:     // DWARF 5
+        case DW_FORM_ref_sup4:  // DWARF 5
             *this += 4;
             return;
 
         // 8-byte fixed size
-        case dw_form_t::DW_FORM_data8:
-        case dw_form_t::DW_FORM_ref8:
-        case dw_form_t::DW_FORM_ref_sig8:
-        case dw_form_t::DW_FORM_ref_sup8:  // DWARF 5
+        case DW_FORM_data8:
+        case DW_FORM_ref8:
+        case DW_FORM_ref_sig8:
+        case DW_FORM_ref_sup8:  // DWARF 5
             *this += 8;
             return;
 
         // 16-byte fixed size
-        case dw_form_t::DW_FORM_data16:  // DWARF 5
+        case DW_FORM_data16:  // DWARF 5
             *this += 16;
             return;
 
         // Variable size signed LEB128
-        case dw_form_t::DW_FORM_sdata:
+        case DW_FORM_sdata:
             get_sleb128();
             return;
 
         // Variable size unsigned LEB128
-        case dw_form_t::DW_FORM_udata:
-        case dw_form_t::DW_FORM_ref_udata:
-        case dw_form_t::DW_FORM_strx:      // DWARF 5
-        case dw_form_t::DW_FORM_addrx:     // DWARF 5
-        case dw_form_t::DW_FORM_loclistx:  // DWARF 5
-        case dw_form_t::DW_FORM_rnglistx:  // DWARF 5
+        case DW_FORM_udata:
+        case DW_FORM_ref_udata:
+        case DW_FORM_strx:      // DWARF 5
+        case DW_FORM_addrx:     // DWARF 5
+        case DW_FORM_loclistx:  // DWARF 5
+        case DW_FORM_rnglistx:  // DWARF 5
             get_uleb128();
             return;
 
         // Variable size blocks - LEB128 length + data
-        case dw_form_t::DW_FORM_block:
-        case dw_form_t::DW_FORM_exprloc:
+        case DW_FORM_block:
+        case DW_FORM_exprloc:
             *this += get_uleb128();
             return;
 
         // Variable size blocks - fixed length + data
-        case dw_form_t::DW_FORM_block1:
+        case DW_FORM_block1:
             *this += get_u8();
             return;
-        case dw_form_t::DW_FORM_block2:
+        case DW_FORM_block2:
             *this += get_u16();
             return;
-        case dw_form_t::DW_FORM_block4:
+        case DW_FORM_block4:
             *this += get_u32();
             return;
 
         // Null-terminated string
-        case dw_form_t::DW_FORM_string:
+        case DW_FORM_string:
             get_string();
             return;
 
         // Special case - indirect form
-        case dw_form_t::DW_FORM_indirect: {
-            skip_form(dw_form_t{get_uleb128()});
+        case DW_FORM_indirect: {
+            skip_form(get_uleb128());
             return;
         }
     }
@@ -269,7 +468,7 @@ auto dwarf::compile_unit_containing_address(file_addr address) const -> const co
 auto dwarf::function_containing_address(file_addr address) const -> std::optional<die> {
     index_();
     for (const auto& [_name, die] : function_index_) {
-        if (die.contains_address(address) && die.abbreviation().tag == dw_tag_t::DW_TAG_subprogram) {
+        if (die.contains_address(address) && die.abbreviation().tag == DW_TAG_subprogram) {
             return die;
         }
     }
@@ -294,9 +493,9 @@ auto dwarf::index_() const -> void {
 }
 
 auto dwarf::index_die_(const die& die) const -> void {
-    bool is_function = die.abbreviation().tag == dw_tag_t::DW_TAG_subprogram ||
-                       die.abbreviation().tag == dw_tag_t::DW_TAG_inlined_subroutine;
-    bool has_range = die.contains(dw_attr_type_t::DW_AT_low_pc) && die.contains(dw_attr_type_t::DW_AT_high_pc);
+    bool is_function =
+        die.abbreviation().tag == DW_TAG_subprogram || die.abbreviation().tag == DW_TAG_inlined_subroutine;
+    bool has_range = die.contains(DW_AT_low_pc) && die.contains(DW_AT_high_pc);
 
     if (is_function && has_range) {
         auto name = die.name();
@@ -309,6 +508,11 @@ auto dwarf::index_die_(const die& die) const -> void {
 }
 
 // ========== impl compile_unit ==========
+
+compile_unit::compile_unit(dwarf& parent_dwarf, std::span<const std::byte> span, std::size_t abbrev_offset)
+    : parent(&parent_dwarf), span_(span), abbrev_offset_(abbrev_offset) {
+    line_table_ = parse_line_table(*this);
+}
 
 auto compile_unit::root() const -> die {
     constexpr auto cu_header_size = 12;  // For 32-bit DWARF 5, see parse_compile_unit()
@@ -324,11 +528,11 @@ auto die::next_die_parse_span() const -> std::span<const std::byte> {
     return {start, size};
 }
 
-auto die::contains(dw_attr_type_t attr) const -> bool {
+auto die::contains(uint64_t attr) const -> bool {
     return std::ranges::any_of(abbrev_->attrs, [attr](const auto& spec) -> bool { return spec.type == attr; });
 }
 
-auto die::operator[](dw_attr_type_t att) const -> attr {
+auto die::operator[](uint64_t att) const -> attr {
     const auto& attr_specs = abbrev_->attrs;
     for (std::size_t i = 0; i < attr_specs.size(); ++i) {
         const auto& spec = attr_specs[i];
@@ -340,27 +544,27 @@ auto die::operator[](dw_attr_type_t att) const -> attr {
 }
 
 auto die::low_pc() const -> file_addr {
-    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
-        return (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list().begin()->low;
+    if (this->contains(DW_AT_ranges)) {
+        return (*this)[DW_AT_ranges].as_range_list().begin()->low;
     }
 
-    if (this->contains(dw_attr_type_t::DW_AT_low_pc)) {
-        return (*this)[dw_attr_type_t::DW_AT_low_pc].as_address();
+    if (this->contains(DW_AT_low_pc)) {
+        return (*this)[DW_AT_low_pc].as_address();
     }
 
     error::send("DIE does not contain DW_AT_low_pc or DW_AT_ranges");
 }
 
 auto die::high_pc() const -> file_addr {
-    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
-        auto range_list = (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list();
+    if (this->contains(DW_AT_ranges)) {
+        auto range_list = (*this)[DW_AT_ranges].as_range_list();
         auto it = range_list.begin();
         while (std::next(it) != range_list.end()) ++it;
         return it->high;  // high addr in last range
     }
 
-    if (this->contains(dw_attr_type_t::DW_AT_high_pc)) {
-        auto attr = (*this)[dw_attr_type_t::DW_AT_high_pc];
+    if (this->contains(DW_AT_high_pc)) {
+        auto attr = (*this)[DW_AT_high_pc];
 
         // Per DWARF5.pdf, 2.17.2:
         // If the value of the DW_AT_high_pc is of class address, it is the address of the first location past the last
@@ -368,7 +572,7 @@ auto die::high_pc() const -> file_addr {
         // which when added to the low PC gives the address of the first location past the last instruction associated
         // with the entity.
 
-        if (attr.form() == dw_form_t::DW_FORM_addr) {
+        if (attr.form() == DW_FORM_addr) {
             return attr.as_address();
         }
         return low_pc() + attr.as_int();
@@ -382,11 +586,11 @@ auto die::contains_address(file_addr address) const -> bool {
         return false;
     }
 
-    if (this->contains(dw_attr_type_t::DW_AT_ranges)) {
-        return (*this)[dw_attr_type_t::DW_AT_ranges].as_range_list().contains(address);
+    if (this->contains(DW_AT_ranges)) {
+        return (*this)[DW_AT_ranges].as_range_list().contains(address);
     }
 
-    if (this->contains(dw_attr_type_t::DW_AT_low_pc)) {
+    if (this->contains(DW_AT_low_pc)) {
         return this->low_pc() <= address && address < this->high_pc();
     }
 
@@ -403,14 +607,14 @@ auto die::name() const -> std::optional<std::string_view> {
     // the compiler has copy-pasted into the body of another function) contain a DW_AT_abstract_origin attribute that
     // points to the DIE representing the copied function.
 
-    if (this->contains(dw_attr_type_t::DW_AT_name)) {
-        return (*this)[dw_attr_type_t::DW_AT_name].as_string();
+    if (this->contains(DW_AT_name)) {
+        return (*this)[DW_AT_name].as_string();
     }
-    if (this->contains(dw_attr_type_t::DW_AT_specification)) {
-        return (*this)[dw_attr_type_t::DW_AT_specification].as_reference().name();
+    if (this->contains(DW_AT_specification)) {
+        return (*this)[DW_AT_specification].as_reference().name();
     }
-    if (this->contains(dw_attr_type_t::DW_AT_abstract_origin)) {
-        return (*this)[dw_attr_type_t::DW_AT_abstract_origin].as_reference().name();
+    if (this->contains(DW_AT_abstract_origin)) {
+        return (*this)[DW_AT_abstract_origin].as_reference().name();
     }
     return std::nullopt;
 }
@@ -456,7 +660,7 @@ auto die::children_range::iterator::operator==(const iterator& other) const -> b
 // ========== impl attr ==========
 
 auto attr::as_address() const -> file_addr {
-    if (form_ != dw_form_t::DW_FORM_addr) error::send("Invalid form");
+    if (form_ != DW_FORM_addr) error::send("Invalid form");
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     const auto& elf = this->cu_->dwarf_info().elf_file();
@@ -464,7 +668,7 @@ auto attr::as_address() const -> file_addr {
 }
 
 auto attr::as_section_offset() const -> std::uint32_t {
-    if (form_ != dw_form_t::DW_FORM_sec_offset) error::send("Invalid form");
+    if (form_ != DW_FORM_sec_offset) error::send("Invalid form");
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     return cur.get_u32();
@@ -474,15 +678,15 @@ auto attr::as_int() const -> std::uint64_t {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     switch (form_) {
-        case dw_form_t::DW_FORM_data1:
+        case DW_FORM_data1:
             return cur.get_u8();
-        case dw_form_t::DW_FORM_data2:
+        case DW_FORM_data2:
             return cur.get_u16();
-        case dw_form_t::DW_FORM_data4:
+        case DW_FORM_data4:
             return cur.get_u32();
-        case dw_form_t::DW_FORM_data8:
+        case DW_FORM_data8:
             return cur.get_u64();
-        case dw_form_t::DW_FORM_udata:
+        case DW_FORM_udata:
             return cur.get_uleb128();
         default:
             error::send("Invalid integer form");
@@ -494,16 +698,16 @@ auto attr::as_block() const -> std::span<const std::byte> {
     cursor cur({location_, cu_->span().end().base()});
     std::size_t size = 0;
     switch (form_) {
-        case dw_form_t::DW_FORM_block1:
+        case DW_FORM_block1:
             size = cur.get_u8();
             break;
-        case dw_form_t::DW_FORM_block2:
+        case DW_FORM_block2:
             size = cur.get_u16();
             break;
-        case dw_form_t::DW_FORM_block4:
+        case DW_FORM_block4:
             size = cur.get_u32();
             break;
-        case dw_form_t::DW_FORM_block:
+        case DW_FORM_block:
             size = cur.get_uleb128();
             break;
         default:
@@ -517,22 +721,22 @@ auto attr::as_reference() const -> die {
     cursor cur({location_, cu_->span().end().base()});
     std::size_t offset = 0;
     switch (form_) {
-        case dw_form_t::DW_FORM_ref1:
+        case DW_FORM_ref1:
             offset = cur.get_u8();
             break;
-        case dw_form_t::DW_FORM_ref2:
+        case DW_FORM_ref2:
             offset = cur.get_u16();
             break;
-        case dw_form_t::DW_FORM_ref4:
+        case DW_FORM_ref4:
             offset = cur.get_u32();
             break;
-        case dw_form_t::DW_FORM_ref8:
+        case DW_FORM_ref8:
             offset = cur.get_u64();
             break;
-        case dw_form_t::DW_FORM_ref_udata:
+        case DW_FORM_ref_udata:
             offset = cur.get_uleb128();
             break;
-        case dw_form_t::DW_FORM_ref_addr: {
+        case DW_FORM_ref_addr: {
             // Special handling
             offset = cur.get_u32();
             auto debug_info_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_info");
@@ -558,15 +762,15 @@ auto xdb::attr::as_string() const -> std::string_view {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     switch (form_) {
-        case dw_form_t::DW_FORM_string:
+        case DW_FORM_string:
             return cur.get_string();
-        case dw_form_t::DW_FORM_strp: {
+        case DW_FORM_strp: {
             auto offset = cur.get_u32();
             auto debug_str_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_str");
             cursor stab_cur({debug_str_span.begin() + offset, debug_str_span.end()});
             return stab_cur.get_string();
         }
-        case dw_form_t::DW_FORM_line_strp: {
+        case DW_FORM_line_strp: {
             auto offset = cur.get_u32();
             auto debug_line_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_line_str");
             cursor stab_cur({debug_line_span.begin() + offset, debug_line_span.end()});
@@ -584,12 +788,12 @@ auto xdb::attr::as_range_list() const -> xdb::range_list {
 
     std::uint32_t offset = 0;
     switch (form_) {
-        case dw_form_t::DW_FORM_sec_offset: {
+        case DW_FORM_sec_offset: {
             offset = as_section_offset();
             break;
         }
 
-        case dw_form_t::DW_FORM_rnglistx: {
+        case DW_FORM_rnglistx: {
             // See Range List Table spec: DWARF5.pdf, Page 242
 
             // P.216, this is an unsigned ULEB
@@ -602,7 +806,7 @@ auto xdb::attr::as_range_list() const -> xdb::range_list {
             // the header) of the compilation unit’s contribution to the .debug_rnglists
             // section. References to range lists (using DW_FORM_rnglistx) within the
             // compilation unit are interpreted relative to this base.
-            auto rnglists_base = cu_->root()[dw_attr_type_t::DW_AT_rnglists_base].as_section_offset();
+            auto rnglists_base = cu_->root()[DW_AT_rnglists_base].as_section_offset();
             cur += rnglists_base;
 
             // P.198: In the body of the .debug_loclists and .debug_rnglists sections, the
@@ -630,8 +834,7 @@ auto xdb::attr::as_range_list() const -> xdb::range_list {
     // ... If there is no preceding base address entry, then the applicable base address defaults to the base address of
     // the compilation unit.
     auto root = cu_->root();
-    file_addr base_address =
-        root.contains(dw_attr_type_t::DW_AT_low_pc) ? root[dw_attr_type_t::DW_AT_low_pc].as_address() : file_addr{};
+    file_addr base_address = root.contains(DW_AT_low_pc) ? root[DW_AT_low_pc].as_address() : file_addr{};
 
     return {*cu_, data, base_address};
 }

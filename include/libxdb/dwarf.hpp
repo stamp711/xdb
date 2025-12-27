@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
 #include <libxdb/bit.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
@@ -26,14 +27,14 @@ class attr;
 class range_list;
 
 struct attr_spec {
-    dw_attr_type_t type;
-    dw_form_t form;
-    std::int64_t implicit_const_value;  // For DW_FORM_implicit_const
+    uint64_t type;
+    uint64_t form;
+    int64_t implicit_const_value;  // For DW_FORM_implicit_const
 };
 
 struct abbrev {
-    std::uint64_t code;
-    dw_tag_t tag;
+    uint64_t code;
+    uint64_t tag;
     bool has_children;
     std::vector<attr_spec> attrs;
 };
@@ -103,7 +104,7 @@ class cursor {
         return static_cast<std::int64_t>(res);
     }
 
-    void skip_form(dw_form_t form);
+    void skip_form(uint64_t form);
 
    private:
     std::span<const std::byte> span_;
@@ -142,10 +143,58 @@ class dwarf {
     auto index_die_(const die& die) const -> void;
 };
 
+class compile_unit;
+class line_table {
+   public:
+    // represent file entries
+    struct file {
+        std::filesystem::path path;
+        uint64_t directory_index;
+        std::uint64_t timestamp;
+        std::uint64_t size;
+        // TODO: MD5?
+    };
+
+    ~line_table() = default;
+
+    line_table(const line_table&) = delete;
+    auto operator=(const line_table&) -> line_table& = delete;
+
+    line_table(line_table&&) = delete;
+    auto operator=(line_table&&) -> line_table& = delete;
+
+    line_table(std::span<const std::byte> data, const compile_unit& cu, bool default_is_stmt, int8_t line_base,
+               uint8_t line_range, uint8_t opcode_base, std::vector<std::filesystem::path> directories,
+               std::vector<file> file_names)
+        : data_(data),
+          cu_(&cu),
+          default_is_stmt_(default_is_stmt),
+          line_base_(line_base),
+          line_range_(line_range),
+          opcode_base_(opcode_base),
+          directories_(std::move(directories)),
+          file_names_(std::move(file_names)) {}
+
+    auto cu() const -> const compile_unit& { return *cu_; }
+    auto file_names() const -> const std::vector<file>& { return file_names_; }
+
+   private:
+    std::span<const std::byte> data_;
+    const compile_unit* cu_;
+
+    // Necessary infos from the header. See P.153: Line Number Program Header
+    bool default_is_stmt_;  // The initial value of the is_stmt register.
+    int8_t line_base_;
+    uint8_t line_range_;
+    uint8_t opcode_base_;
+
+    std::vector<std::filesystem::path> directories_;
+    mutable std::vector<file> file_names_;
+};
+
 class compile_unit {
    public:
-    compile_unit(dwarf& parent_dwarf, std::span<const std::byte> span, std::size_t abbrev_offset)
-        : parent(&parent_dwarf), span_(span), abbrev_offset_(abbrev_offset) {}
+    compile_unit(dwarf& parent_dwarf, std::span<const std::byte> span, std::size_t abbrev_offset);
 
     auto dwarf_info() const -> const dwarf& { return *parent; }
     auto span() const -> std::span<const std::byte> { return span_; }
@@ -153,12 +202,15 @@ class compile_unit {
         return parent->get_abbrev_table(abbrev_offset_);
     }
 
+    auto lines() const -> const line_table& { return *line_table_; }
+
     auto root() const -> die;
 
    private:
     dwarf* parent;
     std::span<const std::byte> span_;
     std::size_t abbrev_offset_;
+    std::unique_ptr<line_table> line_table_;
 };
 
 class die {
@@ -186,8 +238,8 @@ class die {
 
     auto cu() const -> const compile_unit& { return *cu_; }
 
-    auto contains(dw_attr_type_t attr) const -> bool;
-    auto operator[](dw_attr_type_t attr) const -> class attr;
+    auto contains(uint64_t attr) const -> bool;  // TODO: rename to contains_attr
+    auto operator[](uint64_t attr) const -> class attr;
     auto abbreviation() const -> const abbrev& { return *abbrev_; }
 
     auto low_pc() const -> file_addr;
@@ -260,11 +312,11 @@ class range_list;
 class attr {
    public:
     attr() = delete;
-    attr(dw_attr_type_t type, dw_form_t form, const std::byte* location, const compile_unit& cu)
+    attr(uint64_t type, uint64_t form, const std::byte* location, const compile_unit& cu)
         : type_(type), form_(form), location_(location), cu_(&cu) {}
 
-    auto type() const -> dw_attr_type_t { return type_; }
-    auto form() const -> dw_form_t { return form_; }
+    auto type() const -> uint64_t { return type_; }
+    auto form() const -> uint64_t { return form_; }
 
     auto as_address() const -> file_addr;
     auto as_section_offset() const -> std::uint32_t;
@@ -275,8 +327,8 @@ class attr {
     auto as_range_list() const -> range_list;
 
    private:
-    dw_attr_type_t type_;
-    dw_form_t form_;
+    uint64_t type_;
+    uint64_t form_;
     const std::byte* location_;
     const compile_unit* cu_;
     // const die* die_;  // We don't store die_ because there's no storage for them in dwarf, easy to use-after-free

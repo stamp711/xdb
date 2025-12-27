@@ -16,8 +16,8 @@ class dwarf_dumper {
     const xdb::dwarf& dwarf_;
     std::size_t current_cu_offset_ = 0;
 
-    static std::string get_tag_name(dw_tag_t tag) {
-        auto name = magic_enum::enum_name(tag);
+    static std::string get_tag_name(uint64_t tag) {
+        auto name = magic_enum::enum_name(static_cast<DW_TAG>(tag));
         if (name.empty()) {
             std::stringstream ss;
             ss << "DW_TAG_unknown_" << std::hex << static_cast<std::uint64_t>(tag);
@@ -26,8 +26,8 @@ class dwarf_dumper {
         return std::string(name);
     }
 
-    static std::string get_attr_name(dw_attr_type_t attr) {
-        auto name = magic_enum::enum_name(attr);
+    static std::string get_attr_name(uint64_t attr) {
+        auto name = magic_enum::enum_name(static_cast<DW_AT>(attr));
         if (name.empty()) {
             std::stringstream ss;
             ss << "DW_AT_unknown_" << std::hex << static_cast<std::uint64_t>(attr);
@@ -36,8 +36,8 @@ class dwarf_dumper {
         return std::string(name);
     }
 
-    static std::string get_form_name(dw_form_t form) {
-        auto name = magic_enum::enum_name(form);
+    static std::string get_form_name(uint64_t form) {
+        auto name = magic_enum::enum_name(static_cast<DW_FORM>(form));
         if (name.empty()) {
             std::stringstream ss;
             ss << "DW_FORM_unknown_" << std::hex << static_cast<std::uint64_t>(form);
@@ -71,23 +71,23 @@ class dwarf_dumper {
         std::stringstream ss;
 
         switch (attr.form()) {
-            case dw_form_t::DW_FORM_addr: {
+            case DW_FORM_addr: {
                 auto addr_val = attr.as_address();
                 ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << addr_val.addr();
                 return ss.str();
             }
 
-            case dw_form_t::DW_FORM_flag_present: {
+            case DW_FORM_flag_present: {
                 return "yes(1)";
             }
 
-            case dw_form_t::DW_FORM_strp:
-            case dw_form_t::DW_FORM_line_strp:
-            case dw_form_t::DW_FORM_string: {
+            case DW_FORM_strp:
+            case DW_FORM_line_strp:
+            case DW_FORM_string: {
                 return std::string(attr.as_string());
             }
 
-            case dw_form_t::DW_FORM_sec_offset: {
+            case DW_FORM_sec_offset: {
                 auto offset = attr.as_section_offset();
                 ss << "0x" << std::hex << std::setfill('0') << std::setw(8) << offset;
                 return ss.str();
@@ -95,7 +95,7 @@ class dwarf_dumper {
 
             default: {
                 // For high_pc that's not an address, show special formatting
-                if (attr.type() == dw_attr_type_t::DW_AT_high_pc && attr.form() != dw_form_t::DW_FORM_addr) {
+                if (attr.type() == DW_AT_high_pc && attr.form() != DW_FORM_addr) {
                     auto offset = attr.as_int();
                     ss << "<offset-from-lowpc> <" << offset << '>';
                     ss << " <highpc: ";

@@ -614,7 +614,7 @@ TEST_CASE("DWARF language is correct", "[dwarf]") {
     const auto& cus = elf.get_dwarf().compile_units();
     REQUIRE(cus.size() == 1);
 
-    REQUIRE(cus[0]->root()[dw_attr_type_t::DW_AT_language].as_int() == DW_LANG_C_plus_plus_14);
+    REQUIRE(cus[0]->root()[DW_AT_language].as_int() == DW_LANG_C_plus_plus_14);
 }
 
 TEST_CASE("DWARF DIE iteration", "[dwarf]") {
