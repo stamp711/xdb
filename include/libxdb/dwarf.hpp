@@ -155,6 +155,8 @@ class line_table {
         // TODO: MD5?
     };
 
+    struct entry;
+
     ~line_table() = default;
 
     line_table(const line_table&) = delete;
@@ -175,8 +177,14 @@ class line_table {
           directories_(std::move(directories)),
           file_names_(std::move(file_names)) {}
 
+    auto initial_state() const -> entry;
+
     auto cu() const -> const compile_unit& { return *cu_; }
     auto file_names() const -> const std::vector<file>& { return file_names_; }
+
+    class iterator;
+    auto begin() const -> iterator;
+    auto end() const -> iterator;
 
    private:
     std::span<const std::byte> data_;
@@ -189,7 +197,69 @@ class line_table {
     uint8_t opcode_base_;
 
     std::vector<std::filesystem::path> directories_;
-    mutable std::vector<file> file_names_;
+    std::vector<file> file_names_;
+};
+
+// P.153: Line number program initial state
+struct line_table::entry {
+    file_addr address;
+    // uint64_t op_index = 0;
+    uint64_t file = 1;
+    uint64_t line = 1;
+    uint64_t column = 0;
+    bool is_stmt = false;  // should init to default_is_stmt in line table header
+    bool basic_block = false;
+    bool end_sequence = false;
+    bool prologue_end = false;
+    bool epilogue_begin = false;
+    // uint64_t isa = 0;
+    uint64_t discriminator = 0;
+
+    entry(bool is_stmt_v) : is_stmt(is_stmt_v) {}
+
+    const struct file* file_entry = nullptr;
+
+    auto operator==(const entry& other) const -> bool {
+        // file + line + column + discriminator
+        return address == other.address && file == other.file && line == other.line && column == other.column &&
+               discriminator == other.discriminator;
+    }
+};
+
+class line_table::iterator {
+   public:
+    using iterator_category = std::forward_iterator_tag;
+    using difference_type = std::ptrdiff_t;
+    using value_type = entry;
+    using reference = const entry&;
+    using pointer = const entry*;
+
+    explicit iterator(const line_table& table)
+        : table_(&table), current_(table.default_is_stmt_), registers_(table.default_is_stmt_) {
+        ++(*this);
+    }
+    iterator() : current_(false), registers_(false) {}
+
+    auto operator*() const -> reference { return current_; }
+    auto operator->() const -> pointer { return &current_; }
+
+    auto operator==(const iterator& other) const -> bool { return pos_ == other.pos_; }
+    auto operator!=(const iterator& other) const -> bool { return pos_ != other.pos_; }
+
+    auto operator++() -> iterator&;
+    auto operator++(int) -> iterator {
+        iterator tmp = *this;
+        ++(*this);
+        return tmp;
+    }
+
+   private:
+    auto execute_instruction_() -> bool;
+
+    const line_table* table_ = nullptr;
+    line_table::entry current_;
+    line_table::entry registers_;
+    const std::byte* pos_ = nullptr;
 };
 
 class compile_unit {
@@ -368,14 +438,7 @@ class range_list::iterator {
     using iterator_category = std::forward_iterator_tag;
 
     iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address);
-
-    ~iterator() = default;
-
     iterator() = default;
-    iterator(iterator&&) = default;
-    auto operator=(iterator&&) -> iterator& = default;
-    iterator(const iterator& other) = default;
-    auto operator=(const iterator&) -> iterator& = default;
 
     auto operator*() const -> reference { return current_; }
     auto operator->() const -> pointer { return &current_; }

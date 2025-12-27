@@ -863,7 +863,7 @@ enum DW_LNS {
 };
 
 /* DWARF extended opcode encodings.  */
-enum {
+enum DW_LNE {
     DW_LNE_end_sequence = 1,
     DW_LNE_set_address = 2,
     DW_LNE_define_file = 3,

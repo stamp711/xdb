@@ -36,24 +36,25 @@ class file_addr {
     explicit file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
     file_addr() = default;
 
-    [[nodiscard]] std::uint64_t addr() const noexcept { return addr_; }
-    [[nodiscard]] const elf* elf_file() const noexcept { return elf_; }
-    [[nodiscard]] std::optional<virt_addr> to_virt_addr() const;
+    auto addr() const noexcept -> std::uint64_t { return addr_; }
+    auto addr_mut() noexcept -> std::uint64_t& { return addr_; }
+    auto elf_file() const noexcept -> const elf* { return elf_; }
+    auto to_virt_addr() const -> std::optional<virt_addr>;
 
-    [[nodiscard]] file_addr operator+(std::uint64_t offset) const noexcept { return file_addr(*elf_, addr_ + offset); }
-    [[nodiscard]] file_addr operator-(std::uint64_t offset) const noexcept { return file_addr(*elf_, addr_ - offset); }
-    [[nodiscard]] std::uint64_t operator-(const file_addr& other) const {
+    auto operator+(std::uint64_t offset) const noexcept -> file_addr { return file_addr(*elf_, addr_ + offset); }
+    auto operator-(std::uint64_t offset) const noexcept -> file_addr { return file_addr(*elf_, addr_ - offset); }
+    auto operator-(const file_addr& other) const -> std::uint64_t {
         assert(elf_ == other.elf_);
         return addr_ - other.addr_;
     }
 
-    file_addr& operator+=(std::uint64_t offset) noexcept { return addr_ += offset, *this; }
-    file_addr& operator-=(std::uint64_t offset) noexcept { return addr_ -= offset, *this; }
+    auto operator+=(std::uint64_t offset) noexcept -> file_addr& { return addr_ += offset, *this; }
+    auto operator-=(std::uint64_t offset) noexcept -> file_addr& { return addr_ -= offset, *this; }
 
-    [[nodiscard]] bool operator==(const file_addr& other) const noexcept {
+    auto operator==(const file_addr& other) const noexcept -> bool {
         return addr_ == other.addr_ && elf_ == other.elf_;
     }
-    [[nodiscard]] auto operator<=>(const file_addr& other) const {
+    auto operator<=>(const file_addr& other) const {
         assert(elf_ == other.elf_);
         return addr_ <=> other.addr_;
     }
