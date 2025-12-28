@@ -59,7 +59,7 @@ class syscall_catch_policy {
     }
 
     [[nodiscard]] catch_mode get_mode() const { return mode_; }
-    [[nodiscard]] const std::unordered_set<std::uint64_t> &get_to_catch() const { return to_catch_; }
+    [[nodiscard]] const std::unordered_set<std::uint64_t>& get_to_catch() const { return to_catch_; }
 
    private:
     syscall_catch_policy(catch_mode mode, std::span<const std::uint64_t> to_catch)
@@ -73,15 +73,15 @@ class process {
    public:
     // -- forbid default construct and copy --
     process() = delete;
-    process(const process &) = delete;
-    process &operator=(const process &) = delete;
-    process(process &&) = delete;
-    process &operator=(process &&) = delete;
+    process(const process&) = delete;
+    process& operator=(const process&) = delete;
+    process(process&&) = delete;
+    process& operator=(process&&) = delete;
 
     ~process();
 
     // -- create by launching or attaching --
-    static std::unique_ptr<process> launch(const std::filesystem::path &path, bool debug = true,
+    static std::unique_ptr<process> launch(const std::filesystem::path& path, bool debug = true,
                                            std::optional<int> stdout_replacement = std::nullopt);
     static std::unique_ptr<process> attach(pid_t pid);
 
@@ -93,11 +93,11 @@ class process {
     xdb::stop_reason step_instruction();
 
     // -- registers --
-    [[nodiscard]] registers &get_registers() { return *registers_; }
-    [[nodiscard]] const registers &get_registers() const { return *registers_; }
+    [[nodiscard]] registers& get_registers() { return *registers_; }
+    [[nodiscard]] const registers& get_registers() const { return *registers_; }
     void write_user_area(std::size_t offset, std::uint64_t data);
-    void write_gprs(const user_regs_struct &gprs);
-    void write_fprs(const user_fpregs_struct &fprs);
+    void write_gprs(const user_regs_struct& gprs);
+    void write_fprs(const user_fpregs_struct& fprs);
     [[nodiscard]] virt_addr get_pc() const {
         return virt_addr(get_registers().read_by_id_as<std::uint64_t>(register_id::rip));
     }
@@ -114,14 +114,14 @@ class process {
     }
 
     // -- breakpoint sites --
-    breakpoint_site &create_breakpoint_site(virt_addr addr, bool hardware = false, bool internal = false);
-    [[nodiscard]] stoppoint_collection<breakpoint_site> &breakpoint_sites() { return breakpoint_sites_; }
-    [[nodiscard]] const stoppoint_collection<breakpoint_site> &breakpoint_sites() const { return breakpoint_sites_; }
+    breakpoint_site& create_breakpoint_site(virt_addr addr, bool hardware = false, bool internal = false);
+    [[nodiscard]] stoppoint_collection<breakpoint_site>& breakpoint_sites() { return breakpoint_sites_; }
+    [[nodiscard]] const stoppoint_collection<breakpoint_site>& breakpoint_sites() const { return breakpoint_sites_; }
 
     // -- watchpoints --
-    watchpoint &create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
-    [[nodiscard]] stoppoint_collection<watchpoint> &watchpoints() { return watchpoints_; }
-    [[nodiscard]] const stoppoint_collection<watchpoint> &watchpoints() const { return watchpoints_; }
+    watchpoint& create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size);
+    [[nodiscard]] stoppoint_collection<watchpoint>& watchpoints() { return watchpoints_; }
+    [[nodiscard]] const stoppoint_collection<watchpoint>& watchpoints() const { return watchpoints_; }
 
     // If a hardware breakpoint or watchpoint is hit, this method returns the ID of the hit stoppoint.
     [[nodiscard]] std::variant<breakpoint_site::id_type, watchpoint::id_type> get_current_hardware_stoppoint() const;
@@ -145,7 +145,7 @@ class process {
     void clear_hardware_stoppoint_(int hw_stoppoint_index);
 
     // Populate optional fields related to SIGTRAP reason to stop_reason
-    void augment_stop_reason_(stop_reason &reason);
+    void augment_stop_reason_(stop_reason& reason);
 
     pid_t pid_;
     bool terminate_on_destruction_;

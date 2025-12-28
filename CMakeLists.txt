@@ -41,3 +41,14 @@ if(BUILD_TESTING)
     find_package(Catch2 CONFIG REQUIRED)
     add_subdirectory(test)
 endif()
+
+find_program(CLANG_FORMAT clang-format)
+if(CLANG_FORMAT)
+    add_custom_target(
+        format
+        COMMAND
+            find ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src -name
+            "*.cpp" -o -name "*.hpp" -o -name "*.h" | xargs ${CLANG_FORMAT} -i
+        COMMENT "Formatting code..."
+    )
+endif()

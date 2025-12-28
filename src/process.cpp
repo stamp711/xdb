@@ -110,14 +110,14 @@ std::unique_ptr<process> process::attach(pid_t pid) {
     return proc;
 }
 
-void exit_with_perror(pipe &p, const std::string &prefix) {
+void exit_with_perror(pipe& p, const std::string& prefix) {
     auto message = prefix + ": " + strerror(errno);
-    p.write(reinterpret_cast<const std::byte *>(message.data()), message.size());
+    p.write(reinterpret_cast<const std::byte*>(message.data()), message.size());
     p.close_write();
     ::exit(-1);
 }
 
-std::unique_ptr<process> process::launch(const std::filesystem::path &path, bool debug,
+std::unique_ptr<process> process::launch(const std::filesystem::path& path, bool debug,
                                          std::optional<int> stdout_replacement) {
     pipe p(true);  // Create a pipe with close-on-exec
 
@@ -200,7 +200,7 @@ void process::resume() {
     // Single step the breakpoint if it was hit
     auto pc = get_pc();
     if (breakpoint_sites_.enabled_stoppoint_address(pc)) {
-        auto &bp = breakpoint_sites_.get_by_address(pc);
+        auto& bp = breakpoint_sites_.get_by_address(pc);
         bp.disable();  // Disable the breakpoint
         // Single step the process
         if (ptrace(PTRACE_SINGLESTEP, pid_, nullptr, nullptr) == -1) {
@@ -267,9 +267,9 @@ stop_reason process::step_instruction() {
     // If we are stopped at a breakpoint, restore it to the original instruction
     // before stepping
     auto pc = get_pc();
-    std::optional<breakpoint_site *> bp_to_reenable;
+    std::optional<breakpoint_site*> bp_to_reenable;
     if (breakpoint_sites_.enabled_stoppoint_address(pc)) {
-        auto &bp = breakpoint_sites_.get_by_address(pc);
+        auto& bp = breakpoint_sites_.get_by_address(pc);
         bp.disable();
         bp_to_reenable = &bp;
     }
@@ -347,14 +347,14 @@ void process::write_user_area(std::size_t offset, std::uint64_t data) {
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void process::write_gprs(const user_regs_struct &gprs) {
+void process::write_gprs(const user_regs_struct& gprs) {
     if (ptrace(PTRACE_SETREGS, pid_, nullptr, &gprs) == -1) {
         error::send_errno("PTRACE_SETREGS failed");
     }
 }
 
 // NOLINTNEXTLINE(readability-make-member-function-const)
-void process::write_fprs(const user_fpregs_struct &fprs) {
+void process::write_fprs(const user_fpregs_struct& fprs) {
     if (ptrace(PTRACE_SETFPREGS, pid_, nullptr, &fprs) == -1) {
         error::send_errno("PTRACE_SETFPREGS failed");
     }
@@ -372,7 +372,7 @@ std::vector<std::byte> process::read_memory(virt_addr addr, std::size_t size) co
         auto iov_len = std::min(size, size_to_next_page_boundary);
         remote_iovs.emplace_back(
             ::iovec{.iov_base =
-                        /* NOLINT(performance-no-int-to-ptr) */ reinterpret_cast<void *>(addr.addr()),
+                        /* NOLINT(performance-no-int-to-ptr) */ reinterpret_cast<void*>(addr.addr()),
                     .iov_len = iov_len});
 
         addr += iov_len;
@@ -388,7 +388,7 @@ std::vector<std::byte> process::read_memory(virt_addr addr, std::size_t size) co
 
 [[nodiscard]] std::vector<std::byte> process::read_memory_without_traps(virt_addr addr, std::size_t size) const {
     auto memory = read_memory(addr, size);
-    for (const auto &bp : breakpoint_sites_.get_in_address_range(addr, addr + size)) {
+    for (const auto& bp : breakpoint_sites_.get_in_address_range(addr, addr + size)) {
         if (!bp->is_enabled() || bp->is_hardware()) {
             continue;
         }
@@ -424,7 +424,7 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
         }
 
         // Copy the data into the word to write
-        std::memcpy(reinterpret_cast<char *>(&word) + offset, data.data(), size);
+        std::memcpy(reinterpret_cast<char*>(&word) + offset, data.data(), size);
 
         if (::ptrace(PTRACE_POKEDATA, pid_, word_start.addr(), word) == -1) {
             error::send_errno("ptrace POKEDATA failed");
@@ -435,7 +435,7 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
     }
 }
 
-breakpoint_site &process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) {
+breakpoint_site& process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) {
     if (breakpoint_sites_.contains_address(address)) {
         error::send("Breakpoint site already exists at address " + std::to_string(address.addr()));
     }
@@ -443,7 +443,7 @@ breakpoint_site &process::create_breakpoint_site(virt_addr address, bool hardwar
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
-watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
+watchpoint& process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
     if (watchpoints_.contains_address(addr)) {
         error::send("Watchpoint already exists at address " + std::to_string(addr.addr()));
     }
@@ -454,7 +454,7 @@ watchpoint &process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std:
 constexpr auto DR7_MODE_BITS_OFFSET = 16;
 
 std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current_hardware_stoppoint() const {
-    const auto &regs = get_registers();
+    const auto& regs = get_registers();
 
     // Get index of the hit hardware stoppoint from DR6
     auto dr6_value = regs.read_by_id_as<std::uint64_t>(register_id::dr6);
@@ -488,8 +488,8 @@ std::unordered_map<std::uint64_t, std::uint64_t> process::get_auxv() const {
     std::uint64_t type = 0;
     std::uint64_t value = 0;
 
-    while (auxv_file.read(reinterpret_cast<char *>(&type), sizeof(type)) &&
-           auxv_file.read(reinterpret_cast<char *>(&value), sizeof(value))) {
+    while (auxv_file.read(reinterpret_cast<char*>(&type), sizeof(type)) &&
+           auxv_file.read(reinterpret_cast<char*>(&value), sizeof(value))) {
         if (type == 0) {  // AT_NULL marks the end of the auxv
             break;
         }
@@ -503,7 +503,7 @@ int process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::s
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
 
-    auto &regs = get_registers();
+    auto& regs = get_registers();
     auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
 
     // Find a free slot for the stoppoint
@@ -533,7 +533,7 @@ int process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::s
 }
 
 void process::clear_hardware_stoppoint_(int hw_stoppoint_index) {
-    auto &regs = get_registers();
+    auto& regs = get_registers();
     auto control = regs.read_by_id_as<std::uint64_t>(register_id::dr7);
 
     // Clear the stoppoint
@@ -542,7 +542,7 @@ void process::clear_hardware_stoppoint_(int hw_stoppoint_index) {
     regs.write_by_id(register_id::dr7, control);
 }
 
-void process::augment_stop_reason_(stop_reason &reason) {
+void process::augment_stop_reason_(stop_reason& reason) {
     siginfo_t info;
     if (ptrace(PTRACE_GETSIGINFO, pid(), nullptr, &info) == -1) {
         error::send_errno("PTRACE_GETSIGINFO failed");
@@ -569,8 +569,8 @@ void process::augment_stop_reason_(stop_reason &reason) {
         reason.trap_reason = trap_type::syscall;
 
         // Fill in syscall info
-        auto &syscall_info = reason.syscall_info.emplace();
-        const auto &regs = get_registers();
+        auto& syscall_info = reason.syscall_info.emplace();
+        const auto& regs = get_registers();
 
         if (expecting_syscall_exit_) {
             // Syscall exit

@@ -1,11 +1,10 @@
-#include <libxdb/dwarf/range_list.hpp>
-
 #include <libxdb/detail/dwarf.h>
 
 #include <algorithm>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/cursor.hpp>
 #include <libxdb/dwarf/dwarf.hpp>
+#include <libxdb/dwarf/range_list.hpp>
 #include <libxdb/error.hpp>
 
 namespace xdb {

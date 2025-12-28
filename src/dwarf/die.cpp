@@ -1,14 +1,13 @@
-#include <libxdb/dwarf/die.hpp>
-
-#include "parse.hpp"
-
 #include <libxdb/detail/dwarf.h>
 
 #include <algorithm>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/cursor.hpp>
+#include <libxdb/dwarf/die.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
+
+#include "parse.hpp"
 
 namespace xdb::detail {
 auto parse_die(const xdb::compile_unit& cu, xdb::cursor cur) -> xdb::die {
