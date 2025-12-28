@@ -1,4 +1,4 @@
-file(GLOB SRC_FILES "*.cpp")
+file(GLOB_RECURSE SRC_FILES "*.cpp")
 add_library(libxdb ${SRC_FILES})
 add_library(xdb::libxdb ALIAS libxdb)
 
