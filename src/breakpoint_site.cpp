@@ -13,7 +13,7 @@ auto get_next_id() {
     return ++current_id;
 }
 
-std::byte replace_byte_in_process(xdb::process& proc, xdb::virt_addr address, std::byte new_byte) {
+auto replace_byte_in_process(xdb::process& proc, xdb::virt_addr address, std::byte new_byte) -> std::byte {
     // return original_byte;
     auto original_byte = proc.read_memory_as<std::byte>(address);
     proc.write_memory(address, std::span(&new_byte, 1));

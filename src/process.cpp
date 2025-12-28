@@ -26,7 +26,7 @@ namespace {
 constexpr std::size_t WORD_SIZE = 8;
 
 // Returns 0/1/2/3, or throw an exception if there's no free space
-int find_free_stoppoint_register(std::uint64_t control) {
+auto find_free_stoppoint_register(std::uint64_t control) -> int {
     for (int i = 0; i < 4; ++i) {
         if ((control & (0b11ULL << (2 * i))) == 0) {
             return i;
@@ -35,7 +35,7 @@ int find_free_stoppoint_register(std::uint64_t control) {
     xdb::error::send("No free stoppoint register available");
 }
 
-std::uint64_t encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) {
+auto encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) -> std::uint64_t {
     switch (mode) {
         case xdb::stoppoint_mode::execute:
             return 0b00;
@@ -48,7 +48,7 @@ std::uint64_t encode_hardware_stoppoint_mode(xdb::stoppoint_mode mode) {
     }
 }
 
-xdb::stoppoint_mode decode_hardware_stoppoint_mode(std::uint64_t mode) {
+auto decode_hardware_stoppoint_mode(std::uint64_t mode) -> xdb::stoppoint_mode {
     switch (mode) {
         case 0b00:
             return xdb::stoppoint_mode::execute;
@@ -61,7 +61,7 @@ xdb::stoppoint_mode decode_hardware_stoppoint_mode(std::uint64_t mode) {
     }
 }
 
-std::uint64_t encode_hardware_stoppoint_size(std::size_t size) {
+auto encode_hardware_stoppoint_size(std::size_t size) -> std::uint64_t {
     constexpr std::size_t BYTES_1 = 1;
     constexpr std::size_t BYTES_2 = 2;
     constexpr std::size_t BYTES_8 = 8;
@@ -93,7 +93,7 @@ void set_ptrace_options(pid_t pid) {
 
 namespace xdb {
 
-std::unique_ptr<process> process::attach(pid_t pid) {
+auto process::attach(pid_t pid) -> std::unique_ptr<process> {
     // Attaching to a process by PID
     if (pid <= 0) {
         error::send("Invalid PID");
@@ -117,8 +117,8 @@ void exit_with_perror(pipe& p, const std::string& prefix) {
     ::exit(-1);
 }
 
-std::unique_ptr<process> process::launch(const std::filesystem::path& path, bool debug,
-                                         std::optional<int> stdout_replacement) {
+auto process::launch(const std::filesystem::path& path, bool debug, std::optional<int> stdout_replacement)
+    -> std::unique_ptr<process> {
     pipe p(true);  // Create a pipe with close-on-exec
 
     pid_t pid = fork();
@@ -221,7 +221,7 @@ void process::resume() {
     state_ = process_state::running;
 }
 
-stop_reason process::wait_on_signal() {
+auto process::wait_on_signal() -> stop_reason {
     int wait_status = 0;
     if (waitpid(pid_, &wait_status, 0) < 0) {
         error::send_errno("waitpid failed");
@@ -263,7 +263,7 @@ stop_reason process::wait_on_signal() {
     return reason;
 }
 
-stop_reason process::step_instruction() {
+auto process::step_instruction() -> stop_reason {
     // If we are stopped at a breakpoint, restore it to the original instruction
     // before stepping
     auto pc = get_pc();
@@ -319,7 +319,7 @@ void process::read_all_registers_() {
 
     // Read debug registers
     // Template helper to read a single debug register at compile-time index
-    auto read_debug_register = [this]<int I>() {
+    auto read_debug_register = [this]<int I>() -> void {
         auto id = static_cast<int>(register_id::dr0) + I;
         auto offset = register_info_by_id(static_cast<register_id>(id)).offset;
 
@@ -334,7 +334,7 @@ void process::read_all_registers_() {
 
     // Read all debug registers using fold expression
     constexpr int DEBUG_REGISTER_COUNT = 8;
-    [&]<int... Is>(std::integer_sequence<int, Is...>) {
+    [&]<int... Is>(std::integer_sequence<int, Is...>) -> void {
         (read_debug_register.template operator()<Is>(), ...);
     }(std::make_integer_sequence<int, DEBUG_REGISTER_COUNT>{});
 }
@@ -360,7 +360,7 @@ void process::write_fprs(const user_fpregs_struct& fprs) {
     }
 }
 
-std::vector<std::byte> process::read_memory(virt_addr addr, std::size_t size) const {
+auto process::read_memory(virt_addr addr, std::size_t size) const -> std::vector<std::byte> {
     // Prepare data buffer and local iovec
     std::vector<std::byte> data(size);
     ::iovec local_iov = {.iov_base = data.data(), .iov_len = data.size()};
@@ -386,7 +386,7 @@ std::vector<std::byte> process::read_memory(virt_addr addr, std::size_t size) co
     return data;
 }
 
-[[nodiscard]] std::vector<std::byte> process::read_memory_without_traps(virt_addr addr, std::size_t size) const {
+auto process::read_memory_without_traps(virt_addr addr, std::size_t size) const -> std::vector<std::byte> {
     auto memory = read_memory(addr, size);
     for (const auto& bp : breakpoint_sites_.get_in_address_range(addr, addr + size)) {
         if (!bp->is_enabled() || bp->is_hardware()) {
@@ -435,7 +435,7 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
     }
 }
 
-breakpoint_site& process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) {
+auto process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) -> breakpoint_site& {
     if (breakpoint_sites_.contains_address(address)) {
         error::send("Breakpoint site already exists at address " + std::to_string(address.addr()));
     }
@@ -443,7 +443,7 @@ breakpoint_site& process::create_breakpoint_site(virt_addr address, bool hardwar
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
-watchpoint& process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size) {
+auto process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std::size_t size) -> watchpoint& {
     if (watchpoints_.contains_address(addr)) {
         error::send("Watchpoint already exists at address " + std::to_string(addr.addr()));
     }
@@ -453,7 +453,7 @@ watchpoint& process::create_watchpoint(virt_addr addr, stoppoint_mode mode, std:
 
 constexpr auto DR7_MODE_BITS_OFFSET = 16;
 
-std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current_hardware_stoppoint() const {
+auto process::get_current_hardware_stoppoint() const -> std::variant<breakpoint_site::id_type, watchpoint::id_type> {
     const auto& regs = get_registers();
 
     // Get index of the hit hardware stoppoint from DR6
@@ -476,7 +476,7 @@ std::variant<breakpoint_site::id_type, watchpoint::id_type> process::get_current
     return ret_type{std::in_place_index<1>, watchpoints_.get_by_address(addr).id()};
 }
 
-std::unordered_map<std::uint64_t, std::uint64_t> process::get_auxv() const {
+auto process::get_auxv() const -> std::unordered_map<std::uint64_t, std::uint64_t> {
     auto path = "/proc/" + std::to_string(pid_) + "/auxv";
     std::ifstream auxv_file(path, std::ios::binary);
     if (!auxv_file.is_open()) {
@@ -499,7 +499,7 @@ std::unordered_map<std::uint64_t, std::uint64_t> process::get_auxv() const {
     return auxv_map;
 }
 
-int process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::size_t size) {
+auto process::set_hardware_stoppoint_(virt_addr addr, stoppoint_mode mode, std::size_t size) -> int {
     auto mode_flag = encode_hardware_stoppoint_mode(mode);
     auto size_flag = encode_hardware_stoppoint_size(size);
 

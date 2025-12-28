@@ -10,7 +10,7 @@ constexpr std::uint64_t TEST_VALUE = 0xcafecafe;
 constexpr std::size_t BUFFER_SIZE = 128;
 }  // namespace
 
-int main() {
+auto main() -> int {
     std::uint64_t a = TEST_VALUE;
     auto* a_address = &a;
 

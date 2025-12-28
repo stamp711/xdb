@@ -662,7 +662,7 @@ TEST_CASE("Line table", "[dwarf]") {
     {
         auto it = line_table.begin();
         while (it != line_table.end()) {
-            std::cout << *it << std::endl;
+            std::cout << *it << '\n';
             ++it;
         }
     }

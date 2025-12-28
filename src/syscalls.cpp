@@ -15,7 +15,7 @@ const std::unordered_map<std::string_view, std::uint64_t> g_syscall_name_map = {
 
 namespace xdb {
 
-std::string_view syscall_id_to_name(std::uint64_t id) {
+auto syscall_id_to_name(std::uint64_t id) -> std::string_view {
     switch (id) {
 #define DEFINE_SYSCALL(name, id) \
     case id:                     \
@@ -27,7 +27,7 @@ std::string_view syscall_id_to_name(std::uint64_t id) {
     }
 }
 
-std::uint64_t syscall_name_to_id(std::string_view name) {
+auto syscall_name_to_id(std::string_view name) -> std::uint64_t {
     auto it = g_syscall_name_map.find(name);
     if (it == g_syscall_name_map.end()) {
         error::send("Unknown syscall name");

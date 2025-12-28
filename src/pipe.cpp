@@ -33,7 +33,7 @@ void pipe::close_write() {
     }
 }
 
-std::vector<std::byte> pipe::read() {
+auto pipe::read() -> std::vector<std::byte> {
     if (fds_[READ_END] == -1) {
         error::send("Read end of pipe is closed");
     }

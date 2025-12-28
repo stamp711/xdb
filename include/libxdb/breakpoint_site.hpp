@@ -11,26 +11,26 @@ class breakpoint_site {
    public:
     breakpoint_site() = delete;
     breakpoint_site(const breakpoint_site&) = delete;
-    breakpoint_site& operator=(const breakpoint_site&) = delete;
+    auto operator=(const breakpoint_site&) -> breakpoint_site& = delete;
     breakpoint_site(breakpoint_site&&) = delete;
-    breakpoint_site& operator=(breakpoint_site&&) = delete;
+    auto operator=(breakpoint_site&&) -> breakpoint_site& = delete;
     ~breakpoint_site() = default;
 
     using id_type = std::int32_t;
-    [[nodiscard]] id_type id() const { return id_; }
+    auto id() const -> id_type { return id_; }
 
     void enable();
     void disable();
 
-    [[nodiscard]] bool is_hardware() const { return is_hardware_; }
-    [[nodiscard]] bool is_internal() const { return is_internal_; }
-    [[nodiscard]] int hardware_register_index() const { return hardware_register_index_; }
+    auto is_hardware() const -> bool { return is_hardware_; }
+    auto is_internal() const -> bool { return is_internal_; }
+    auto hardware_register_index() const -> int { return hardware_register_index_; }
 
-    [[nodiscard]] bool is_enabled() const { return is_enabled_; }
-    [[nodiscard]] virt_addr address() const { return address_; }
+    auto is_enabled() const -> bool { return is_enabled_; }
+    auto address() const -> virt_addr { return address_; }
 
-    [[nodiscard]] bool at_address(virt_addr addr) const { return address_ == addr; }
-    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const { return address_ >= low && address_ < high; }
+    auto at_address(virt_addr addr) const -> bool { return address_ == addr; }
+    auto in_range(virt_addr low, virt_addr high) const -> bool { return address_ >= low && address_ < high; }
 
    private:
     friend process;

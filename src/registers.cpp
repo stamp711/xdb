@@ -15,7 +15,7 @@ namespace {
 constexpr std::uint64_t ALIGNMENT_MASK = 0b111ULL;
 }  // namespace
 
-xdb::registers::value xdb::registers::read(const register_info& info) const {
+auto xdb::registers::read(const register_info& info) const -> xdb::registers::value {
     auto user_bytes_span = std::span{as_bytes(data_), sizeof(data_)};
     const auto* byte_ptr = &user_bytes_span.at(info.offset);
 
@@ -57,7 +57,7 @@ xdb::registers::value xdb::registers::read(const register_info& info) const {
 
 namespace {
 template <class T>
-xdb::byte128 widen(const xdb::register_info& info, T t) {
+auto widen(const xdb::register_info& info, T t) -> xdb::byte128 {
     if constexpr (std::is_floating_point_v<T>) {
         // Floating point
         if (info.format == xdb::register_format::double_float) {
@@ -93,7 +93,7 @@ void xdb::registers::write(const register_info& info, value val) {
 
     // Write val to user_bytes
     std::visit(
-        [&info, &user_bytes_span](auto& v) {
+        [&info, &user_bytes_span](auto& v) -> void {
             if (sizeof(v) <= info.size) {
                 auto wide = widen(info, v);
                 auto val_bytes = as_bytes(wide);

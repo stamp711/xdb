@@ -30,8 +30,8 @@
 
 namespace {
 
-const xdb::process *&get_xdb_process() {
-    static const xdb::process *g_xdb_process = nullptr;
+auto get_xdb_process() -> const xdb::process*& {
+    static const xdb::process* g_xdb_process = nullptr;
     return g_xdb_process;
 }
 
@@ -43,7 +43,7 @@ void handle_signal(int signum) {
     }
 }
 
-std::unique_ptr<xdb::target> attach(std::span<const char *const> args) {
+auto attach(std::span<const char* const> args) -> std::unique_ptr<xdb::target> {
     if (args.size() < 2) {
         std::cerr << "Usage: xdb [-p PID] [program_path]\n";
         return nullptr;
@@ -59,7 +59,7 @@ std::unique_ptr<xdb::target> attach(std::span<const char *const> args) {
     return xdb::target::launch(path);
 }
 
-std::vector<std::string> split(std::string_view str, char delimiter) {
+auto split(std::string_view str, char delimiter) -> std::vector<std::string> {
     std::vector<std::string> tokens;
     size_t start = 0;
     while (start < str.size()) {
@@ -77,19 +77,19 @@ std::vector<std::string> split(std::string_view str, char delimiter) {
     return tokens;
 }
 
-std::string format_syscall_trap_info(const xdb::syscall_information &syscall) {
+auto format_syscall_trap_info(const xdb::syscall_information& syscall) -> std::string {
     if (syscall.is_entry) {
         return " (syscall entry)";
     }
     return " (syscall exit)";
 }
 
-void print_syscall_details(const xdb::syscall_information &syscall) {
+void print_syscall_details(const xdb::syscall_information& syscall) {
     auto syscall_name = xdb::syscall_id_to_name(syscall.id);
 
     if (syscall.is_entry) {
         if (syscall.args.has_value()) {
-            const auto &args = syscall.args.value();
+            const auto& args = syscall.args.value();
             fmt::println("syscall entry: {}({:#x}, {:#x}, {:#x}, {:#x}, {:#x}, {:#x})", syscall_name, args[0], args[1],
                          args[2], args[3], args[4], args[5]);
         } else {
@@ -104,7 +104,7 @@ void print_syscall_details(const xdb::syscall_information &syscall) {
     }
 }
 
-std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason &reason) {
+auto get_sigtrap_info(const xdb::process& process, const xdb::stop_reason& reason) -> std::string {
     std::string message;
 
     if (!reason.trap_reason.has_value()) {
@@ -112,7 +112,7 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
     }
     switch (reason.trap_reason.value()) {
         case xdb::trap_type::software_breakpoint: {
-            const auto &bp = process.breakpoint_sites().get_by_address(process.get_pc());
+            const auto& bp = process.breakpoint_sites().get_by_address(process.get_pc());
             message = fmt::format(" (breakpoint {})", bp.id());
         } break;
 
@@ -127,7 +127,7 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
             } else if (id.index() == 1) {  // Hardware watchpoint
                 const auto watchpoint_id = std::get<1>(id);
                 message = fmt::format(" (watchpoint {})", watchpoint_id);
-                const auto &wp = process.watchpoints().get_by_id(watchpoint_id);
+                const auto& wp = process.watchpoints().get_by_id(watchpoint_id);
                 if (wp.data() == wp.previous_data()) {
                     message += fmt::format("\n Value: {:#x}", wp.data());
                 } else {
@@ -150,7 +150,7 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
     }
 
     if (reason.trap_reason == xdb::trap_type::software_breakpoint) {
-        const auto &bp = process.breakpoint_sites().get_by_address(process.get_pc());
+        const auto& bp = process.breakpoint_sites().get_by_address(process.get_pc());
         message = fmt::format(" (breakpoint {})", bp.id());
 
     } else if (reason.trap_reason == xdb::trap_type::single_step) {
@@ -163,7 +163,7 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
         } else if (id.index() == 1) {  // Hardware watchpoint
             const auto watchpoint_id = std::get<1>(id);
             message = fmt::format(" (watchpoint {})", watchpoint_id);
-            const auto &wp = process.watchpoints().get_by_id(watchpoint_id);
+            const auto& wp = process.watchpoints().get_by_id(watchpoint_id);
             if (wp.data() == wp.previous_data()) {
                 message += fmt::format("\n Value: {:#x}", wp.data());
             } else {
@@ -176,7 +176,7 @@ std::string get_sigtrap_info(const xdb::process &process, const xdb::stop_reason
     return message;
 }
 
-std::string generate_signal_stop_reason(const xdb::target &target, const xdb::stop_reason &reason) {
+auto generate_signal_stop_reason(const xdb::target& target, const xdb::stop_reason& reason) -> std::string {
     auto message =
         fmt::format("stopped by signal {} at {:#x}", sigabbrev_np(reason.info), target.get_process().get_pc().addr());
 
@@ -187,7 +187,7 @@ std::string generate_signal_stop_reason(const xdb::target &target, const xdb::st
     return message;
 }
 
-void print_stop_reason(const xdb::target &target, const xdb::stop_reason &reason) {
+void print_stop_reason(const xdb::target& target, const xdb::stop_reason& reason) {
     std::string message;
     switch (reason.state) {
         case xdb::process_state::running:
@@ -214,10 +214,10 @@ void print_stop_reason(const xdb::target &target, const xdb::stop_reason &reason
     }
 }
 
-void handle_stop(xdb::target &target, xdb::stop_reason reason) {
+void handle_stop(xdb::target& target, xdb::stop_reason reason) {
     print_stop_reason(target, reason);
     if (reason.state == xdb::process_state::stopped) {
-        const auto *func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
+        const auto* func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
         if (func != nullptr && ELF64_ST_TYPE(func->st_info) == STT_FUNC) {
             auto func_name = target.get_elf().get_string(func->st_name);
             fmt::println("In function {}:", func_name);
@@ -227,10 +227,10 @@ void handle_stop(xdb::target &target, xdb::stop_reason reason) {
     }
 }
 
-void handle_command(std::unique_ptr<xdb::target> &target, std::string_view line) {
+void handle_command(std::unique_ptr<xdb::target>& target, std::string_view line) {
     auto args = split(line, ' ');
-    const auto &command = args[0];
-    auto *process = &target->get_process();
+    const auto& command = args[0];
+    auto* process = &target->get_process();
 
     if (command == "help" || command == "h") {
         xdb_handlers::print_help(args);
@@ -264,7 +264,7 @@ void handle_command(std::unique_ptr<xdb::target> &target, std::string_view line)
     }
 }
 
-int run(std::span<const char *const> args) {
+auto run(std::span<const char* const> args) -> int {
     if (args.size() < 2) {
         std::cerr << "No arguments given\n";
         return -1;
@@ -281,7 +281,7 @@ int run(std::span<const char *const> args) {
     // REPL
     std::unique_ptr<char, decltype(&free)> line_ptr{nullptr, &free};
     using_history();
-    while (auto *line = readline("xdb> ")) {
+    while (auto* line = readline("xdb> ")) {
         line_ptr.reset(line);
         std::string line_string;
         if (std::string_view(line) == "") {
@@ -304,11 +304,11 @@ int run(std::span<const char *const> args) {
 
 }  // namespace
 
-int main(int argc, const char *argv[]) {
+auto main(int argc, const char* argv[]) -> int {
     try {
-        std::span<const char *const> args(argv, static_cast<std::size_t>(argc));
+        std::span<const char* const> args(argv, static_cast<std::size_t>(argc));
         return run(args);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << '\n';
         return -1;
     } catch (...) {

@@ -11,18 +11,18 @@ class pipe {
     ~pipe();
 
     pipe(const pipe&) = delete;
-    pipe& operator=(const pipe&) = delete;
+    auto operator=(const pipe&) -> pipe& = delete;
     pipe(pipe&&) = delete;
-    pipe& operator=(pipe&&) = delete;
+    auto operator=(pipe&&) -> pipe& = delete;
 
-    [[nodiscard]] int get_read() const { return fds_[READ_END]; }
-    [[nodiscard]] int get_write() const { return fds_[WRITE_END]; }
-    int release_read();
-    int release_write();
+    auto get_read() const -> int { return fds_[READ_END]; }
+    auto get_write() const -> int { return fds_[WRITE_END]; }
+    auto release_read() -> int;
+    auto release_write() -> int;
     void close_read();
     void close_write();
 
-    std::vector<std::byte> read();
+    auto read() -> std::vector<std::byte>;
     void write(const std::byte* buf, size_t size);
 
    private:

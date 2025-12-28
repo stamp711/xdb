@@ -16,7 +16,8 @@ class disassembler {
    public:
     disassembler(process& process) : process_(&process) {}
 
-    std::vector<instruction> disassemble(std::size_t n_instructions, std::optional<virt_addr> address = std::nullopt);
+    auto disassemble(std::size_t n_instructions, std::optional<virt_addr> address = std::nullopt)
+        -> std::vector<instruction>;
 
    private:
     process* process_;

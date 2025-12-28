@@ -14,7 +14,7 @@ auto range_list::begin() const -> range_list::iterator { return {*cu_, data_, ba
 auto range_list::end() const -> range_list::iterator { return {}; }
 
 auto range_list::contains(file_addr addr) const -> bool {
-    return std::ranges::any_of(*this, [addr](auto& ent) -> auto { return ent.contains(addr); });
+    return std::ranges::any_of(*this, [addr](auto& ent) -> bool { return ent.contains(addr); });
 }
 
 range_list::iterator::iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address)

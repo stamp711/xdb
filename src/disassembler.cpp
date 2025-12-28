@@ -7,8 +7,8 @@
 
 namespace xdb {
 
-std::vector<disassembler::instruction> disassembler::disassemble(std::size_t n_instructions,
-                                                                 std::optional<virt_addr> address) {
+auto disassembler::disassemble(std::size_t n_instructions, std::optional<virt_addr> address)
+    -> std::vector<disassembler::instruction> {
     std::vector<instruction> res;
     res.reserve(n_instructions);
 

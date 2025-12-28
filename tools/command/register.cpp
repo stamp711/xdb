@@ -12,7 +12,7 @@
 
 namespace {
 
-xdb::registers::value parse_register_value(const xdb::register_info &info, const std::string &value_str) {
+auto parse_register_value(const xdb::register_info& info, const std::string& value_str) -> xdb::registers::value {
     try {
         switch (info.format) {
             case xdb::register_format::uint:
@@ -45,7 +45,7 @@ xdb::registers::value parse_register_value(const xdb::register_info &info, const
     xdb::error::send("Invalid format");
 }
 
-void handle_register_read(xdb::process &process, std::span<const std::string> args) {
+void handle_register_read(xdb::process& process, std::span<const std::string> args) {
     auto format = [](auto value) {
         if constexpr (std::is_floating_point_v<decltype(value)>) {
             return fmt::format("{}", value);
@@ -58,7 +58,7 @@ void handle_register_read(xdb::process &process, std::span<const std::string> ar
 
     if (args.size() == 2 || (args.size() == 3 && args[2] == "all")) {
         auto all = args.size() == 3;
-        for (const auto &info : xdb::g_register_infos) {
+        for (const auto& info : xdb::g_register_infos) {
             auto is_gpr = info.type == xdb::register_type::gpr && info.id != xdb::register_id::orig_rax;
             auto should_print = all || is_gpr;
             if (should_print) {
@@ -71,7 +71,7 @@ void handle_register_read(xdb::process &process, std::span<const std::string> ar
             auto info = xdb::register_info_by_name(args[2]);
             auto value = process.get_registers().read(info);
             fmt::println("{}:\t{}", info.name, std::visit(format, value));
-        } catch (const xdb::error &e) {
+        } catch (const xdb::error& e) {
             std::cerr << "No such register\n";
         }
     } else {
@@ -79,7 +79,7 @@ void handle_register_read(xdb::process &process, std::span<const std::string> ar
     }
 }
 
-void handle_register_write(xdb::process &process, std::span<const std::string> args) {
+void handle_register_write(xdb::process& process, std::span<const std::string> args) {
     if (args.size() != 4) {
         xdb_handlers::print_help_init({"help", "register"});
         return;
@@ -88,7 +88,7 @@ void handle_register_write(xdb::process &process, std::span<const std::string> a
         auto info = xdb::register_info_by_name(args[2]);
         auto value = parse_register_value(info, args[3]);
         process.get_registers().write(info, value);
-    } catch (const xdb::error &e) {
+    } catch (const xdb::error& e) {
         std::cerr << "Error writing to register: " << e.what() << '\n';
     }
 }
@@ -97,7 +97,7 @@ void handle_register_write(xdb::process &process, std::span<const std::string> a
 
 namespace xdb_handlers {
 
-void handle_register_command(xdb::process &process, std::span<const std::string> args) {
+void handle_register_command(xdb::process& process, std::span<const std::string> args) {
     if (args.size() < 2) {
         print_help_init({"help", "register"});
         return;

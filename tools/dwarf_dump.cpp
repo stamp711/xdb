@@ -12,11 +12,11 @@
 
 class dwarf_dumper {
    private:
-    const xdb::elf& elf_;
-    const xdb::dwarf& dwarf_;
+    const xdb::elf* elf_;
+    const xdb::dwarf* dwarf_;
     std::size_t current_cu_offset_ = 0;
 
-    static std::string get_tag_name(uint64_t tag) {
+    static auto get_tag_name(uint64_t tag) -> std::string {
         auto name = magic_enum::enum_name(static_cast<DW_TAG>(tag));
         if (name.empty()) {
             std::stringstream ss;
@@ -26,7 +26,7 @@ class dwarf_dumper {
         return std::string(name);
     }
 
-    static std::string get_attr_name(uint64_t attr) {
+    static auto get_attr_name(uint64_t attr) -> std::string {
         auto name = magic_enum::enum_name(static_cast<DW_AT>(attr));
         if (name.empty()) {
             std::stringstream ss;
@@ -36,7 +36,7 @@ class dwarf_dumper {
         return std::string(name);
     }
 
-    static std::string get_form_name(uint64_t form) {
+    static auto get_form_name(uint64_t form) -> std::string {
         auto name = magic_enum::enum_name(static_cast<DW_FORM>(form));
         if (name.empty()) {
             std::stringstream ss;
@@ -46,8 +46,8 @@ class dwarf_dumper {
         return std::string(name);
     }
 
-    std::string decode_strp_value(std::uint32_t offset) {
-        auto debug_str = elf_.get_section_contents(".debug_str");
+    auto decode_strp_value(std::uint32_t offset) -> std::string {
+        auto debug_str = elf_->get_section_contents(".debug_str");
         if (offset >= debug_str.size()) {
             return "<invalid string offset>";
         }
@@ -56,8 +56,8 @@ class dwarf_dumper {
         return std::string(str_cur.get_string());
     }
 
-    std::string decode_line_strp_value(std::uint32_t offset) {
-        auto debug_line_str = elf_.get_section_contents(".debug_line_str");
+    auto decode_line_strp_value(std::uint32_t offset) -> std::string {
+        auto debug_line_str = elf_->get_section_contents(".debug_line_str");
         if (!debug_line_str.empty() && offset < debug_line_str.size()) {
             std::span<const std::byte> str_span(debug_line_str.data() + offset, debug_line_str.size() - offset);
             xdb::cursor str_cur(str_span);
@@ -67,7 +67,7 @@ class dwarf_dumper {
         return decode_strp_value(offset);
     }
 
-    static std::string decode_attribute_value(const xdb::attr& attr, const xdb::die& die) {
+    static auto decode_attribute_value(const xdb::attr& attr, const xdb::die& die) -> std::string {
         std::stringstream ss;
 
         switch (attr.form()) {
@@ -175,12 +175,12 @@ class dwarf_dumper {
     }
 
    public:
-    dwarf_dumper(const xdb::elf& elf, const xdb::dwarf& dwarf) : elf_(elf), dwarf_(dwarf) {}
+    dwarf_dumper(const xdb::elf& elf, const xdb::dwarf& dwarf) : elf_(&elf), dwarf_(&dwarf) {}
 
     void dump_debug_info() {
         std::cout << ".debug_info\n\n";
 
-        const auto& compile_units = dwarf_.compile_units();
+        const auto& compile_units = dwarf_->compile_units();
 
         for (std::size_t cu_idx = 0; cu_idx < compile_units.size(); ++cu_idx) {
             const auto& cu = compile_units[cu_idx];
@@ -204,7 +204,7 @@ class dwarf_dumper {
     }
 
     void dump_debug_str() {
-        auto debug_str = elf_.get_section_contents(".debug_str");
+        auto debug_str = elf_->get_section_contents(".debug_str");
         if (debug_str.empty()) {
             return;
         }
@@ -230,7 +230,7 @@ class dwarf_dumper {
     }
 
     void dump_debug_line() {
-        auto debug_line = elf_.get_section_contents(".debug_line");
+        auto debug_line = elf_->get_section_contents(".debug_line");
         if (debug_line.empty()) {
             return;
         }
@@ -255,7 +255,7 @@ class dwarf_dumper {
     }
 };
 
-int main(int argc, char* argv[]) {
+auto main(int argc, char* argv[]) -> int {
     if (argc != 2) {
         std::cerr << "Usage: " << argv[0] << " <binary_file_path>\n";
         return 1;

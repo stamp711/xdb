@@ -12,7 +12,7 @@
 
 namespace {
 
-std::vector<std::string> split_comma_separated(const std::string& str) {
+auto split_comma_separated(const std::string& str) -> std::vector<std::string> {
     std::vector<std::string> result;
     std::stringstream ss(str);
     std::string item;
@@ -29,7 +29,7 @@ std::vector<std::string> split_comma_separated(const std::string& str) {
     return result;
 }
 
-std::optional<std::uint64_t> parse_syscall_identifier(const std::string& identifier) {
+auto parse_syscall_identifier(const std::string& identifier) -> std::optional<std::uint64_t> {
     // Try to parse as number first
     auto as_number = xdb::to_integral<std::uint64_t>(identifier);
     if (as_number) {
@@ -50,7 +50,7 @@ std::optional<std::uint64_t> parse_syscall_identifier(const std::string& identif
 namespace xdb_handlers {
 
 void handle_catchpoint_command(xdb::process& process, std::span<const std::string> args) {
-    auto phelp = []() { print_help_init({"help", "catchpoint"}); };
+    auto phelp = []() -> void { print_help_init({"help", "catchpoint"}); };
 
     if (args.size() < 2) {
         phelp();

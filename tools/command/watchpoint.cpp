@@ -9,14 +9,14 @@
 
 namespace {
 
-void print_all_watchpoints(xdb::process &process) {
+void print_all_watchpoints(xdb::process& process) {
     if (process.watchpoints().empty()) {
         fmt::println("No watchpoints set.");
         return;
     }
     fmt::println("Watchpoints:");
-    process.watchpoints().for_each([](const auto &watchpoint) {
-        const char *mode_str = "";
+    process.watchpoints().for_each([](const auto& watchpoint) -> void {
+        const char* mode_str = "";
         switch (watchpoint.mode()) {
             case xdb::stoppoint_mode::write:
                 mode_str = "write";
@@ -33,8 +33,8 @@ void print_all_watchpoints(xdb::process &process) {
     });
 }
 
-void handle_watchpoint_set(xdb::process &process, std::span<const std::string> args) {
-    auto phelp = []() { xdb_handlers::print_help_init({"help", "watchpoint"}); };
+void handle_watchpoint_set(xdb::process& process, std::span<const std::string> args) {
+    auto phelp = []() -> void { xdb_handlers::print_help_init({"help", "watchpoint"}); };
 
     if (args.size() < 5) {
         phelp();
@@ -70,7 +70,7 @@ void handle_watchpoint_set(xdb::process &process, std::span<const std::string> a
     try {
         process.create_watchpoint(xdb::virt_addr{*address}, mode, *size).enable();
         fmt::println("Watchpoint set at {:#x}", *address);
-    } catch (const std::exception &e) {
+    } catch (const std::exception& e) {
         fmt::println("Error setting watchpoint: {}", e.what());
     }
 }
@@ -79,8 +79,8 @@ void handle_watchpoint_set(xdb::process &process, std::span<const std::string> a
 
 namespace xdb_handlers {
 
-void handle_watchpoint_command(xdb::process &process, std::span<const std::string> args) {
-    auto phelp = []() { print_help_init({"help", "watchpoint"}); };
+void handle_watchpoint_command(xdb::process& process, std::span<const std::string> args) {
+    auto phelp = []() -> void { print_help_init({"help", "watchpoint"}); };
 
     if (args.size() < 2) {
         phelp();
@@ -112,21 +112,21 @@ void handle_watchpoint_command(xdb::process &process, std::span<const std::strin
         try {
             process.watchpoints().get_by_id(*watchpoint_id).enable();
             fmt::println("Watchpoint {} enabled", *watchpoint_id);
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("Error: {}", e.what());
         }
     } else if (cmd == "disable") {
         try {
             process.watchpoints().get_by_id(*watchpoint_id).disable();
             fmt::println("Watchpoint {} disabled", *watchpoint_id);
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("Error: {}", e.what());
         }
     } else if (cmd == "delete") {
         try {
             process.watchpoints().remove_by_id(*watchpoint_id);
             fmt::println("Watchpoint {} deleted", *watchpoint_id);
-        } catch (const std::exception &e) {
+        } catch (const std::exception& e) {
             fmt::println("Error: {}", e.what());
         }
     } else {

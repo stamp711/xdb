@@ -9,13 +9,13 @@
 
 namespace {
 
-void print_all_breakpoints(xdb::process &process) {
+void print_all_breakpoints(xdb::process& process) {
     if (process.breakpoint_sites().empty()) {
         fmt::println("No breakpoints set.");
         return;
     }
     fmt::println("Breakpoints:");
-    process.breakpoint_sites().for_each([](const auto &breakpoint_site) {
+    process.breakpoint_sites().for_each([](const auto& breakpoint_site) -> void {
         if (breakpoint_site.is_internal()) {
             return;  // Skip internal breakpoints
         }
@@ -25,7 +25,8 @@ void print_all_breakpoints(xdb::process &process) {
     });
 }
 
-std::optional<xdb::virt_addr> resolve_address_or_symbol(const xdb::target &target, const std::string &addr_or_symbol) {
+auto resolve_address_or_symbol(const xdb::target& target, const std::string& addr_or_symbol)
+    -> std::optional<xdb::virt_addr> {
     // Try to parse as hex address first
     constexpr int hex_base = 16;
     auto address = xdb::to_integral<std::uint64_t>(addr_or_symbol, hex_base);
@@ -41,8 +42,8 @@ std::optional<xdb::virt_addr> resolve_address_or_symbol(const xdb::target &targe
     }
 
     // Filter for function symbols
-    std::vector<const Elf64_Sym *> function_symbols;
-    for (const auto *symbol : symbols) {
+    std::vector<const Elf64_Sym*> function_symbols;
+    for (const auto* symbol : symbols) {
         if (ELF64_ST_TYPE(symbol->st_info) == STT_FUNC) {
             function_symbols.push_back(symbol);
         }
@@ -55,13 +56,13 @@ std::optional<xdb::virt_addr> resolve_address_or_symbol(const xdb::target &targe
 
     if (function_symbols.size() > 1) {
         fmt::println("Multiple function symbols found for '{}', using the first one:", addr_or_symbol);
-        for (const auto *symbol : function_symbols) {
+        for (const auto* symbol : function_symbols) {
             fmt::println("  {:#x}", symbol->st_value + target.get_elf().load_bias().addr());
         }
     }
 
     // Use the first function symbol found
-    const auto *symbol = function_symbols[0];
+    const auto* symbol = function_symbols[0];
     auto symbol_addr = xdb::virt_addr{symbol->st_value + target.get_elf().load_bias().addr()};
     fmt::println("Setting breakpoint at function '{}' (address {:#x})", addr_or_symbol, symbol_addr.addr());
     return symbol_addr;
@@ -71,9 +72,9 @@ std::optional<xdb::virt_addr> resolve_address_or_symbol(const xdb::target &targe
 
 namespace xdb_handlers {
 
-void handle_breakpoint_command(xdb::target &target, std::span<const std::string> args) {
-    auto &process = target.get_process();
-    auto phelp = []() { print_help_init({"help", "breakpoint"}); };
+void handle_breakpoint_command(xdb::target& target, std::span<const std::string> args) {
+    auto& process = target.get_process();
+    auto phelp = []() -> void { print_help_init({"help", "breakpoint"}); };
 
     if (args.size() < 2) {
         phelp();

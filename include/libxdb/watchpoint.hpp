@@ -11,27 +11,27 @@ class watchpoint {
    public:
     watchpoint() = delete;
     watchpoint(const watchpoint&) = delete;
-    watchpoint& operator=(const watchpoint&) = delete;
     watchpoint(watchpoint&&) = delete;
-    watchpoint& operator=(watchpoint&&) = delete;
+    auto operator=(const watchpoint&) -> watchpoint& = delete;
+    auto operator=(watchpoint&&) -> watchpoint& = delete;
     ~watchpoint() = default;
 
     using id_type = std::int32_t;
-    [[nodiscard]] id_type id() const { return id_; }
+    auto id() const -> id_type { return id_; }
 
     void enable();
     void disable();
 
-    [[nodiscard]] bool is_enabled() const { return is_enabled_; }
-    [[nodiscard]] virt_addr address() const { return address_; }
-    [[nodiscard]] stoppoint_mode mode() const { return mode_; }
-    [[nodiscard]] std::size_t size() const { return size_; }
+    auto is_enabled() const -> bool { return is_enabled_; }
+    auto address() const -> virt_addr { return address_; }
+    auto mode() const -> stoppoint_mode { return mode_; }
+    auto size() const -> std::size_t { return size_; }
 
-    [[nodiscard]] std::uint64_t data() const { return data_; }
-    [[nodiscard]] std::uint64_t previous_data() const { return previous_data_; }
+    auto data() const -> std::uint64_t { return data_; }
+    auto previous_data() const -> std::uint64_t { return previous_data_; }
 
-    [[nodiscard]] bool at_address(virt_addr addr) const { return address_ == addr; }
-    [[nodiscard]] bool in_range(virt_addr low, virt_addr high) const { return address_ >= low && address_ < high; }
+    auto at_address(virt_addr addr) const -> bool { return address_ == addr; }
+    auto in_range(virt_addr low, virt_addr high) const -> bool { return address_ >= low && address_ < high; }
 
     void record_data_change();
 

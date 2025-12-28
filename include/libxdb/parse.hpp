@@ -15,7 +15,7 @@ constexpr std::size_t HEX_BYTE_LENGTH = 4;  // "0x??" format
 }  // namespace
 
 template <class T>
-[[nodiscard]] std::optional<T> to_integral(std::string_view sv, int base = DECIMAL_BASE) {
+auto to_integral(std::string_view sv, int base = DECIMAL_BASE) -> std::optional<T> {
     const auto* begin = sv.begin();
     if (base == HEX_BASE && sv.size() >= 2 && begin[0] == '0' && begin[1] == 'x') {
         begin += 2;  // Skip "0x" prefix for hexadecimal
@@ -33,12 +33,12 @@ template <class T>
 }
 
 template <>
-[[nodiscard]] inline std::optional<std::byte> to_integral(std::string_view sv, int base) {
-    return to_integral<std::uint8_t>(sv, base).transform([](auto i) { return static_cast<std::byte>(i); });
+inline auto to_integral(std::string_view sv, int base) -> std::optional<std::byte> {
+    return to_integral<std::uint8_t>(sv, base).transform([](auto i) -> std::byte { return static_cast<std::byte>(i); });
 }
 
 template <class T>
-[[nodiscard]] std::optional<T> to_float(std::string_view sv) {
+auto to_float(std::string_view sv) -> std::optional<T> {
     T res;
     auto from_chars_res = std::from_chars(sv.begin(), sv.end(), res);
 
@@ -51,8 +51,8 @@ template <class T>
 }
 
 template <std::size_t N>
-[[nodiscard]] auto parse_vector(std::string_view sv) {
-    auto err = [] { error::send("Invalid vector value format"); };
+auto parse_vector(std::string_view sv) {
+    auto err = [] -> void { error::send("Invalid vector value format"); };
     std::array<std::byte, N> bytes;
 
     if (sv.size() != (/* brackets */ 2) + (/* each byte */ N * HEX_BYTE_LENGTH) + (/* commas */ N - 1)) {
@@ -78,8 +78,8 @@ template <std::size_t N>
 }
 
 // Dynamic version for variable-length byte arrays
-[[nodiscard]] inline std::vector<std::byte> parse_vector(std::string_view sv) {
-    auto err = [] { error::send("Invalid vector value format"); };
+inline auto parse_vector(std::string_view sv) -> std::vector<std::byte> {
+    auto err = [] -> void { error::send("Invalid vector value format"); };
     std::vector<std::byte> bytes;
 
     if (sv.size() < 2 || sv[0] != '[' || sv.back() != ']') {

@@ -23,8 +23,8 @@ class virt_addr;
 class file_offset {
    public:
     explicit file_offset(const elf& obj, std::uint64_t offset) : elf_(&obj), offset_(offset) {}
-    [[nodiscard]] std::uint64_t offset() const noexcept { return offset_; }
-    [[nodiscard]] const elf* elf_file() const noexcept { return elf_; }
+    auto offset() const noexcept -> std::uint64_t { return offset_; }
+    auto elf_file() const noexcept -> const elf* { return elf_; }
 
    private:
     const elf* elf_ = nullptr;
@@ -42,8 +42,8 @@ class file_addr {
     auto elf_file() const noexcept -> const elf* { return elf_; }
     auto to_virt_addr() const -> std::optional<virt_addr>;
 
-    auto operator+(std::uint64_t offset) const noexcept -> file_addr { return file_addr(*elf_, addr_ + offset); }
-    auto operator-(std::uint64_t offset) const noexcept -> file_addr { return file_addr(*elf_, addr_ - offset); }
+    auto operator+(std::uint64_t offset) const noexcept -> file_addr { return {*elf_, addr_ + offset}; }
+    auto operator-(std::uint64_t offset) const noexcept -> file_addr { return {*elf_, addr_ - offset}; }
     auto operator-(const file_addr& other) const -> std::uint64_t {
         assert(elf_ == other.elf_);
         return addr_ - other.addr_;
@@ -74,27 +74,25 @@ class virt_addr {
    public:
     explicit virt_addr(std::uint64_t addr) : addr_(addr) {}
 
-    [[nodiscard]] std::uint64_t addr() const noexcept { return addr_; }
-    [[nodiscard]] virt_addr align_to_word() const noexcept { return virt_addr(addr_ & ~WORD_ALIGNMENT_MASK); }
-    [[nodiscard]] std::optional<file_addr> to_file_addr(const elf& obj) const;
+    auto addr() const noexcept -> std::uint64_t { return addr_; }
+    auto align_to_word() const noexcept -> virt_addr { return virt_addr(addr_ & ~WORD_ALIGNMENT_MASK); }
+    auto to_file_addr(const elf& obj) const -> std::optional<file_addr>;
 
-    [[nodiscard]] virt_addr operator+(std::uint64_t offset) const noexcept { return virt_addr(addr_ + offset); }
-    [[nodiscard]] virt_addr operator-(std::uint64_t offset) const noexcept { return virt_addr(addr_ - offset); }
-    [[nodiscard]] std::uint64_t operator-(const virt_addr& other) const noexcept { return addr_ - other.addr_; }
+    auto operator+(std::uint64_t offset) const noexcept -> virt_addr { return virt_addr(addr_ + offset); }
+    auto operator-(std::uint64_t offset) const noexcept -> virt_addr { return virt_addr(addr_ - offset); }
+    auto operator-(const virt_addr& other) const noexcept -> std::uint64_t { return addr_ - other.addr_; }
 
-    virt_addr& operator+=(std::uint64_t offset) noexcept { return addr_ += offset, *this; }
-    virt_addr& operator-=(std::uint64_t offset) noexcept { return addr_ -= offset, *this; }
+    auto operator+=(std::uint64_t offset) noexcept -> virt_addr& { return addr_ += offset, *this; }
+    auto operator-=(std::uint64_t offset) noexcept -> virt_addr& { return addr_ -= offset, *this; }
 
-    [[nodiscard]] bool operator==(const virt_addr& other) const noexcept = default;
-    [[nodiscard]] auto operator<=>(const virt_addr& other) const noexcept = default;
+    auto operator==(const virt_addr& other) const noexcept -> bool = default;
+    auto operator<=>(const virt_addr& other) const noexcept = default;
 
    private:
     std::uint64_t addr_;
 };
 
-[[nodiscard]] inline std::string to_string(const xdb::virt_addr& virt_addr) {
-    return std::format("{:#x}", virt_addr.addr());
-}
+inline auto to_string(const xdb::virt_addr& virt_addr) -> std::string { return std::format("{:#x}", virt_addr.addr()); }
 
 enum class stoppoint_mode : std::uint8_t {
     execute,
