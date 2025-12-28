@@ -195,6 +195,7 @@ auto parse_line_table(const xdb::compile_unit& cu) -> std::unique_ptr<xdb::line_
             if (file.path.is_relative()) {
                 file.path = dirs[file.directory_index] / file.path;
             }
+            files.push_back(std::move(file));
         }
     }
 

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/die.hpp>
+#include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/dwarf/types.hpp>
 #include <memory>
 #include <span>
@@ -31,6 +32,12 @@ class dwarf {
     auto compile_unit_containing_address(file_addr address) const -> const compile_unit*;
     auto function_containing_address(file_addr address) const -> std::optional<die>;  // Be aware of lifetimes!
     auto find_functions(const std::string& name) const -> std::vector<die>;           // Be aware of lifetimes!
+
+    auto line_entry_at_address(file_addr address) const -> line_table::iterator {
+        const auto* cu = this->compile_unit_containing_address(address);
+        if (cu == nullptr) return cu->line_table().end();
+        return cu->line_table().get_entry_by_address(address);
+    }
 
    private:
     const elf* elf_;

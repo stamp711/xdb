@@ -1,3 +1,6 @@
 #include <iostream>
 
-int main() { std::cout << "hello"; }
+auto main() -> int {
+    std::cout << "hello";
+    return 0;
+}

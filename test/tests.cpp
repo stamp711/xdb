@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <iostream>
 #include <libxdb/bit.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
@@ -646,4 +647,34 @@ TEST_CASE("FInd main in multiple cus", "[dwarf]") {
 
 TEST_CASE("Range list", "[dwarf]") {
     // TODO
+}
+
+TEST_CASE("Line table", "[dwarf]") {
+    auto path = test_path() / "targets/hello";
+    xdb::elf elf(path);
+    const auto& cus = elf.get_dwarf().compile_units();
+    REQUIRE(cus.size() == 1);
+
+    const auto& line_table = cus[0]->line_table();
+    REQUIRE(line_table.file_names().size() > 0);
+
+    // print it all
+    {
+        auto it = line_table.begin();
+        while (it != line_table.end()) {
+            std::cout << *it << std::endl;
+            ++it;
+        }
+    }
+
+    auto it = line_table.begin();
+
+    REQUIRE(it->file_entry->path.filename() == "hello.cpp");
+
+    REQUIRE(it->line == 3);      // auto main() -> int {
+    REQUIRE((++it)->line == 4);  //     std::cout << "hello";
+    REQUIRE((++it)->line == 5);  //     return 0;
+    REQUIRE((++it)->line == 6);  // }
+    REQUIRE((++it)->end_sequence);
+    REQUIRE(++it == line_table.end());
 }

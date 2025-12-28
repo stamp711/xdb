@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <ostream>
 
 namespace xdb {
 
@@ -33,7 +34,7 @@ class file_offset {
 // Virtual address specified in the ELF file
 class file_addr {
    public:
-    explicit file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
+    file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
     file_addr() = default;
 
     auto addr() const noexcept -> std::uint64_t { return addr_; }
@@ -57,6 +58,10 @@ class file_addr {
     auto operator<=>(const file_addr& other) const {
         assert(elf_ == other.elf_);
         return addr_ <=> other.addr_;
+    }
+
+    friend auto operator<<(std::ostream& os, const file_addr& fa) -> std::ostream& {
+        return os << "file_addr { elf<" << fa.elf_ << ">, addr: " << std::format("{:#x}", fa.addr_) << " }";
     }
 
    private:

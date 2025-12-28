@@ -20,7 +20,7 @@ class compile_unit {
     auto span() const -> std::span<const std::byte> { return span_; }
     auto abbrev_table() const -> const std::unordered_map<std::uint64_t, abbrev>&;
 
-    auto lines() const -> const line_table& { return *line_table_; }
+    auto line_table() const -> const line_table& { return *line_table_; }
 
     auto root() const -> die;
 
@@ -28,7 +28,7 @@ class compile_unit {
     dwarf* parent;
     std::span<const std::byte> span_;
     std::size_t abbrev_offset_;
-    std::unique_ptr<line_table> line_table_;
+    std::unique_ptr<class line_table> line_table_;
 };
 
 }  // namespace xdb

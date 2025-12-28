@@ -1,5 +1,7 @@
 #pragma once
 
+#include <fmt/ostream.h>
+
 #include <cstdint>
 #include <filesystem>
 #include <libxdb/types.hpp>
@@ -51,6 +53,9 @@ class line_table {
     auto begin() const -> iterator;
     auto end() const -> iterator;
 
+    auto get_entry_by_address(file_addr address) const -> iterator;
+    auto get_entries_by_line(const std::filesystem::path& path, uint64_t line) const -> std::vector<iterator>;
+
    private:
     std::span<const std::byte> data_;
     const compile_unit* cu_;
@@ -63,6 +68,11 @@ class line_table {
 
     std::vector<std::filesystem::path> directories_;
     std::vector<file> file_names_;
+};
+
+struct source_location {
+    const line_table::file* file;
+    uint64_t line;
 };
 
 // P.153: Line number program initial state
@@ -89,6 +99,13 @@ struct line_table::entry {
         return address == other.address && file == other.file && line == other.line && column == other.column &&
                discriminator == other.discriminator;
     }
+
+    friend auto operator<<(std::ostream& os, const entry& p) -> std::ostream& {
+        return os << "entry { address: " << p.address << ", file: " << p.file << ", line: " << p.line
+                  << ", column: " << p.column << ", is_stmt: " << p.is_stmt << ", basic_block: " << p.basic_block
+                  << ", end_sequence: " << p.end_sequence << ", prologue_end: " << p.prologue_end
+                  << ", epilogue_begin: " << p.epilogue_begin << ", discriminator: " << p.discriminator << " }";
+    }
 };
 
 class line_table::iterator {
@@ -100,10 +117,13 @@ class line_table::iterator {
     using pointer = const entry*;
 
     explicit iterator(const line_table& table)
-        : table_(&table), current_(table.default_is_stmt_), registers_(table.default_is_stmt_) {
+        : table_(&table),
+          current_(table.default_is_stmt_),
+          registers_(table.default_is_stmt_),
+          pos_(table.data_.data()) {
         ++(*this);
     }
-    iterator() : current_(false), registers_(false) {}
+    iterator() : table_(nullptr), current_(false), registers_(false), pos_(nullptr) {}
 
     auto operator*() const -> reference { return current_; }
     auto operator->() const -> pointer { return &current_; }
@@ -121,10 +141,10 @@ class line_table::iterator {
    private:
     auto execute_instruction_() -> bool;
 
-    const line_table* table_ = nullptr;
+    const line_table* table_;
     line_table::entry current_;
     line_table::entry registers_;
-    const std::byte* pos_ = nullptr;
+    const std::byte* pos_;
 };
 
 }  // namespace xdb

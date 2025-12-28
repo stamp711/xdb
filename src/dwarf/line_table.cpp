@@ -1,8 +1,12 @@
 #include <libxdb/detail/dwarf.h>
 
+#include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/cursor.hpp>
+#include <libxdb/dwarf/dwarf.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/error.hpp>
+
+#include "util.hpp"
 
 namespace xdb {
 
@@ -11,6 +15,36 @@ auto line_table::initial_state() const -> entry { return {default_is_stmt_}; }
 auto line_table::begin() const -> iterator { return iterator(*this); }
 
 auto line_table::end() const -> iterator { return {}; }
+
+auto line_table::get_entry_by_address(file_addr address) const -> iterator {
+    auto it = this->begin();
+    if (it == end()) return it;
+
+    auto next = it;
+    next++;
+
+    while (next != end()) {
+        if (it->address <= address && address < next->address && !it->end_sequence) return it;
+        it = next;
+        next++;
+    }
+    return end();
+}
+
+auto line_table::get_entries_by_line(const std::filesystem::path& path, uint64_t line) const -> std::vector<iterator> {
+    std::vector<iterator> res;
+
+    for (auto it = this->begin(); it != this->end(); ++it) {
+        if (it->line == line) {
+            if ((path.is_absolute() && it->file_entry->path == path) ||
+                (path.is_relative() && path_ends_in(it->file_entry->path, path))) {
+                res.push_back(it);
+            }
+        }
+    }
+
+    return res;
+}
 
 auto line_table::iterator::operator++() -> iterator& {
     if (pos_ == table_->data_.end().base()) {
@@ -176,7 +210,7 @@ auto line_table::iterator::execute_instruction_() -> bool {
                 break;
             }
             case DW_LNE_set_address: {
-                registers_.address.addr_mut() = cur.get_u64();
+                registers_.address = {table_->cu().dwarf_info().elf_file(), cur.get_u64()};
                 break;
             }
             case DW_LNE_define_file: {
@@ -194,6 +228,7 @@ auto line_table::iterator::execute_instruction_() -> bool {
         }
     }
 
+    pos_ = cur.data();
     return emitted;
 }
 

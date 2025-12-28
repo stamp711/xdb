@@ -1,5 +1,6 @@
 #pragma once
 
+#include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/dwarf/range_list.hpp>
 #include <libxdb/dwarf/types.hpp>
 #include <libxdb/types.hpp>
@@ -43,6 +44,10 @@ class die {
     auto children() const -> children_range;
 
     auto name() const -> std::optional<std::string_view>;
+
+    auto location() const -> source_location;
+    auto file() const -> const line_table::file&;
+    auto line() const -> uint64_t;
 
    private:
     explicit die(const compile_unit* cu, const std::byte* next, std::span<const std::byte> span, const abbrev* abbrev,

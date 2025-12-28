@@ -4,6 +4,7 @@
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/cursor.hpp>
 #include <libxdb/dwarf/die.hpp>
+#include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
 
@@ -183,6 +184,26 @@ auto die::children_range::iterator::operator==(const iterator& other) const -> b
 
     // Both are not null
     return die_->span_.data() == other.die_->span_.data();
+}
+
+auto die::location() const -> source_location { return {.file = &this->file(), .line = this->line()}; }
+
+auto die::file() const -> const line_table::file& {
+    uint64_t file_idx = 0;
+    if (abbrev_->tag == DW_TAG_inlined_subroutine) {
+        file_idx = (*this)[DW_AT_call_file].as_int();
+    } else {
+        file_idx = (*this)[DW_AT_decl_file].as_int();
+    }
+    // In DWARF 5, the 0th file is the primary file of this CU, it's now explicit.
+    return this->cu_->line_table().file_names()[file_idx];
+}
+
+auto die::line() const -> uint64_t {
+    if (abbrev_->tag == DW_TAG_inlined_subroutine) {
+        return (*this)[DW_AT_call_line].as_int();
+    }
+    return (*this)[DW_AT_decl_line].as_int();
 }
 
 // ========== impl attr ==========
