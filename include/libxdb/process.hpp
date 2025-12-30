@@ -69,6 +69,8 @@ class syscall_catch_policy {
     std::unordered_set<std::uint64_t> to_catch_;
 };
 
+class target;  // fwd
+
 class process {
    public:
     // -- forbid default construct and copy --
@@ -130,6 +132,8 @@ class process {
 
     auto get_auxv() const -> std::unordered_map<std::uint64_t, std::uint64_t>;
 
+    void set_target(target& target) { target_ = &target; }
+
    private:
     process(pid_t pid, bool terminate_on_destruction, bool is_attached)
         : pid_(pid),
@@ -159,6 +163,8 @@ class process {
 
     syscall_catch_policy syscall_catch_policy_ = syscall_catch_policy::catch_none();  // Defaults to catch_none
     bool expecting_syscall_exit_ = false;
+
+    target* target_ = nullptr;
 };
 
 }  // namespace xdb

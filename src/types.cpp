@@ -10,10 +10,10 @@ auto file_addr::to_virt_addr() const -> std::optional<virt_addr> {
     return virt_addr(elf_->load_bias().addr() + addr_);
 }
 
-auto virt_addr::to_file_addr(const elf& obj) const -> std::optional<file_addr> {
+auto virt_addr::to_file_addr(const elf& obj) const -> file_addr {
     const auto* shdr = obj.get_section_header_containing_virt_addr(*this);
-    if (shdr == nullptr) return std::nullopt;
-    return file_addr(obj, addr_ - obj.load_bias().addr());
+    if (shdr == nullptr) return {};
+    return {obj, addr_ - obj.load_bias().addr()};
 }
 
 }  // namespace xdb

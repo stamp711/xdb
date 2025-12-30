@@ -15,6 +15,7 @@
 
 namespace xdb {
 
+/// Parses and provides access to the ELF binary
 class elf {
    public:
     elf(std::filesystem::path path);

@@ -15,6 +15,7 @@
 #include <libxdb/pipe.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
+#include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <libxdb/watchpoint.hpp>
 #include <memory>
@@ -257,6 +258,9 @@ auto process::wait_on_signal() -> stop_reason {
                     return wait_on_signal();
                 }
             }
+        }
+        if (target_ != nullptr) {
+            target_->notify_stop(reason);
         }
     }
 

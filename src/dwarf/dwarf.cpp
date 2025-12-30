@@ -1,5 +1,6 @@
 #include <libxdb/detail/dwarf.h>
 
+#include <algorithm>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/dwarf.hpp>
 #include <libxdb/elf.hpp>
@@ -129,6 +130,27 @@ auto dwarf::find_functions(const std::string& name) const -> std::vector<die> {
         res.push_back(die);
     }
     return res;
+}
+
+auto dwarf::inline_stack_at_address(file_addr address) const -> std::vector<die> {
+    auto func = function_containing_address(address);
+    if (!func) return {};
+
+    std::vector<die> stack;
+    stack.push_back(*func);
+
+    while (true) {
+        // Recursively find inlined functions contains this address
+        const auto& curr = stack.back();
+        auto children_range = curr.children();
+        auto f = std::ranges::find_if(children_range, [&](const auto& child) -> bool {
+            return child.abbreviation().tag == DW_TAG_inlined_subroutine && child.contains_address(address);
+        });
+        if (f == children_range.end()) break;
+        stack.push_back(*f);
+    }
+
+    return stack;
 }
 
 auto dwarf::index_() const -> void {

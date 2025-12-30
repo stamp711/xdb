@@ -175,8 +175,7 @@ auto elf::get_symbol_at_file_addr(file_addr file_addr) const -> const Elf64_Sym*
 
 auto elf::get_symbol_at_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym* {
     auto file_addr = virt_addr.to_file_addr(*this);
-    if (file_addr == std::nullopt) return nullptr;
-    return get_symbol_containing_file_addr(*file_addr);
+    return get_symbol_containing_file_addr(file_addr);
 }
 
 auto elf::get_symbol_containing_file_addr(file_addr file_addr) const -> const Elf64_Sym* {
@@ -197,8 +196,7 @@ auto elf::get_symbol_containing_file_addr(file_addr file_addr) const -> const El
 
 auto elf::get_symbol_containing_virt_addr(virt_addr virt_addr) const -> const Elf64_Sym* {
     auto file_addr = virt_addr.to_file_addr(*this);
-    if (file_addr == std::nullopt) return nullptr;
-    return get_symbol_containing_file_addr(*file_addr);
+    return get_symbol_containing_file_addr(file_addr);
 }
 
 void elf::assert_load_bias_set_() const { assert(load_bias_.addr() != 0); }

@@ -20,14 +20,25 @@ auto target::launch(const std::filesystem::path& path, std::optional<int> stdout
     -> std::unique_ptr<target> {
     auto process = process::launch(path, true, stdout_replacement);
     auto elf = create_loaded_elf(*process, path);
-    return std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
+    auto t = std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
+    process->set_target(*t);
+    return t;
 }
 
 auto target::attach(pid_t pid) -> std::unique_ptr<target> {
     auto process = process::attach(pid);
     auto elf_path = std::filesystem::path("/proc") / std::to_string(pid) / "exe";
     auto elf = create_loaded_elf(*process, elf_path);
-    return std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
+    auto t = std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
+    process->set_target(*t);
+    return t;
+}
+
+void target::notify_stop([[maybe_unused]] const xdb::stop_reason& reason) { stack_.reset_inline_height(); }
+
+auto target::get_pc_file_address() const -> file_addr {
+    // TODO: dynamic library support
+    return process_->get_pc().to_file_addr(*elf_);
 }
 
 }  // namespace xdb

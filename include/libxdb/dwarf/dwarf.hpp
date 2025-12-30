@@ -33,11 +33,19 @@ class dwarf {
     auto function_containing_address(file_addr address) const -> std::optional<die>;  // Be aware of lifetimes!
     auto find_functions(const std::string& name) const -> std::vector<die>;           // Be aware of lifetimes!
 
+    // Get the iterator pointing to the line table entry containing a given address
     auto line_entry_at_address(file_addr address) const -> line_table::iterator {
         const auto* cu = this->compile_unit_containing_address(address);
         if (cu == nullptr) return cu->line_table().end();
         return cu->line_table().get_entry_by_address(address);
     }
+
+    /// Get the inline stack at a given address.
+    ///
+    /// @param address The file address to get the inline stack for.
+    /// @return A vector of die representing the inline stack, with the outermost function (which itself is not inlined)
+    ///         at the beginning.
+    auto inline_stack_at_address(file_addr address) const -> std::vector<die>;
 
    private:
     const elf* elf_;
