@@ -35,7 +35,7 @@ class file_offset {
 class file_addr {
    public:
     file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
-    file_addr() = default;  // empty file_addr
+    file_addr() = default;
 
     auto addr() const noexcept -> std::uint64_t { return addr_; }
     auto addr_mut() noexcept -> std::uint64_t& { return addr_; }
@@ -81,8 +81,8 @@ class virt_addr {
     ///
     /// @param obj The ELF object to use for conversion.
     /// @return The file address corresponding to the virtual address. If the virtual address is not within the ELF
-    ///         object's address space, returns an empty file_addr.
-    auto to_file_addr(const elf& obj) const -> file_addr;
+    ///         object's address space, returns nullopt;
+    auto to_file_addr(const elf& obj) const -> std::optional<file_addr>;
 
     auto operator+(std::uint64_t offset) const noexcept -> virt_addr { return virt_addr(addr_ + offset); }
     auto operator-(std::uint64_t offset) const noexcept -> virt_addr { return virt_addr(addr_ - offset); }

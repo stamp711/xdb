@@ -94,6 +94,25 @@ void set_ptrace_options(pid_t pid) {
 
 namespace xdb {
 
+stop_reason::stop_reason(int wait_status) {
+    if (WIFSTOPPED(wait_status)) {
+        state = process_state::stopped;
+        info = static_cast<uint8_t>(WSTOPSIG(wait_status));
+
+    } else if (WIFEXITED(wait_status)) {
+        state = process_state::exited;
+        info = static_cast<uint8_t>(WEXITSTATUS(wait_status));
+
+    } else if (WIFSIGNALED(wait_status)) {
+        state = process_state::terminated;
+        info = WTERMSIG(wait_status);
+
+    } else {
+        state = process_state::stopped;  // Default case
+        info = 0;
+    }
+}
+
 auto process::attach(pid_t pid) -> std::unique_ptr<process> {
     // Attaching to a process by PID
     if (pid <= 0) {
@@ -291,23 +310,25 @@ auto process::step_instruction() -> stop_reason {
     return reason;
 }
 
-stop_reason::stop_reason(int wait_status) {
-    if (WIFSTOPPED(wait_status)) {
-        state = process_state::stopped;
-        info = static_cast<uint8_t>(WSTOPSIG(wait_status));
-
-    } else if (WIFEXITED(wait_status)) {
-        state = process_state::exited;
-        info = static_cast<uint8_t>(WEXITSTATUS(wait_status));
-
-    } else if (WIFSIGNALED(wait_status)) {
-        state = process_state::terminated;
-        info = WTERMSIG(wait_status);
-
-    } else {
-        state = process_state::stopped;  // Default case
-        info = 0;
+auto process::run_until_address(virt_addr address) -> stop_reason {
+    // Run until address by setting a temporary breakpoint
+    breakpoint_site* breakpoint_to_remove = nullptr;
+    if (this->breakpoint_sites_.contains_address(address)) {
+        breakpoint_to_remove = &this->create_breakpoint_site(address, false, /* internal */ true);
+        breakpoint_to_remove->enable();
     }
+
+    this->resume();
+    auto reason = this->wait_on_signal();
+    if (reason.is_breakpoint() && this->get_pc() == address) {
+        reason.trap_reason = trap_type::single_step;
+    }
+
+    if (breakpoint_to_remove != nullptr) {
+        this->breakpoint_sites_.remove_by_address(breakpoint_to_remove->address());
+    }
+
+    return reason;
 }
 
 void process::read_all_registers_() {

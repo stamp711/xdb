@@ -1,3 +1,4 @@
+#include <libxdb/error.hpp>
 #include <libxdb/stack.hpp>
 #include <libxdb/target.hpp>
 #include <ranges>
@@ -17,9 +18,9 @@ void stack::reset_inline_height() {
 }
 
 auto stack::inline_stack_at_pc() -> std::vector<die> {
-    auto fpc = target_->get_pc_file_address();
-    if (fpc.elf_file() == nullptr) return {};
-    return fpc.elf_file()->get_dwarf().inline_stack_at_address(fpc);
+    auto pc = target_->get_pc_file_address();
+    if (!pc) return {};
+    return pc->elf_file()->get_dwarf().inline_stack_at_address(*pc);
 }
 
 }  // namespace xdb

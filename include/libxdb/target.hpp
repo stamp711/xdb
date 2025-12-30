@@ -1,12 +1,16 @@
 #pragma once
 
+#include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/stack.hpp>
+#include <libxdb/types.hpp>
 
 namespace xdb {
 
 /// Owns both process and elf and coordinates between runtime state and static binary info.
+/// Provides some methods that only functions when process and elf info are both available, such as source-level
+/// stepping.
 class target {
    public:
     target() = delete;
@@ -30,8 +34,14 @@ class target {
     /// Convert current pc to file address using our managed elf object.
     ///
     /// @return The file address corresponding to the virtual address. If we can't convert the address (for example, we
-    ///         can't convert addresses in dynamic libraries for now), returns an empty file_addr.
-    auto get_pc_file_address() const -> file_addr;
+    ///         can't convert addresses in dynamic libraries for now), returns nullopt
+    auto get_pc_file_address() const -> std::optional<file_addr>;
+
+    auto line_entry_at_pc() const -> line_table::iterator;
+
+    auto step_in() -> stop_reason;
+    auto step_out() -> stop_reason;
+    auto step_over() -> stop_reason;
 
    private:
     target(std::unique_ptr<process> proc, std::unique_ptr<elf> obj)

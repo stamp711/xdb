@@ -1,3 +1,5 @@
+#include <libxdb/dwarf/line_table.hpp>
+#include <libxdb/process.hpp>
 #include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
@@ -36,9 +38,56 @@ auto target::attach(pid_t pid) -> std::unique_ptr<target> {
 
 void target::notify_stop([[maybe_unused]] const xdb::stop_reason& reason) { stack_.reset_inline_height(); }
 
-auto target::get_pc_file_address() const -> file_addr {
+auto target::get_pc_file_address() const -> std::optional<file_addr> {
     // TODO: dynamic library support
     return process_->get_pc().to_file_addr(*elf_);
+}
+
+auto target::line_entry_at_pc() const -> line_table::iterator {
+    auto pc = this->get_pc_file_address();
+    if (!pc) return line_table::iterator{};
+    const auto* cu = pc->elf_file()->get_dwarf().compile_unit_containing_address(*pc);
+    if (cu == nullptr) return line_table::iterator{};
+    return cu->line_table().get_entry_by_address(*pc);
+}
+
+auto target::step_in() -> stop_reason {
+    if (stack_.inline_height() > 0) {
+        stack_.simulate_inlined_step_in();
+        return {process_state::stopped, SIGTRAP, trap_type::single_step};
+    }
+
+    auto orig_line = this->line_entry_at_pc();
+    while (true) {
+        auto reason = process_->step_instruction();  // at least step a single instruction
+
+        if (!reason.is_step()) return reason;  // if stopped not because of step, return early
+
+        auto line = this->line_entry_at_pc();
+
+        // no line table entry for current pc
+        if (line == line_table::iterator{} /* end */) break;
+
+        // line entry changed, and is not a special end-of-sequence entry
+        if (line != orig_line && !line->end_sequence) break;
+    }
+
+    // Step over the function prologue if needed
+    auto pc = get_pc_file_address();
+    if (pc) {
+        auto func = pc->elf_file()->get_dwarf().function_containing_address(*pc);
+        if (func && func->low_pc() == *pc) {
+            // we are at start of a function (prologue)
+            auto line = line_entry_at_pc();
+            if (line != line_table::iterator{} /* end */) {
+                // GCC: first line table entry for a function marks the start of the prologue
+                ++line;
+                return this->process_->run_until_address(*line->address.to_virt_addr());
+            }
+        }
+    }
+
+    return {process_state::stopped, SIGTRAP, trap_type::single_step};
 }
 
 }  // namespace xdb

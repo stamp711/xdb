@@ -3,6 +3,7 @@
 #include <sys/types.h>
 
 #include <array>
+#include <csignal>  // IWYU pragma: keep
 #include <filesystem>
 #include <libxdb/bit.hpp>
 #include <libxdb/breakpoint_site.hpp>
@@ -33,11 +34,24 @@ struct syscall_information {
 };
 
 struct stop_reason {
-    stop_reason(int wait_status);
     process_state state;
     std::uint8_t info;
     std::optional<trap_type> trap_reason;
     std::optional<syscall_information> syscall_info;
+
+    stop_reason(int wait_status);
+    stop_reason(process_state state_v, std::uint8_t info_v, std::optional<trap_type> trap_reason_v = std::nullopt,
+                std::optional<syscall_information> syscall_info_v = std::nullopt)
+        : state(state_v), info(info_v), trap_reason(trap_reason_v), syscall_info(syscall_info_v) {}
+
+    auto is_step() const -> bool {
+        return state == process_state::stopped && info == SIGTRAP && trap_reason == trap_type::single_step;
+    }
+
+    auto is_breakpoint() const -> bool {
+        return state == process_state::stopped && info == SIGTRAP &&
+               (trap_reason == trap_type::software_breakpoint || trap_reason == trap_type::hardware_stoppoint);
+    }
 };
 
 class syscall_catch_policy {
@@ -93,6 +107,7 @@ class process {
     auto pid() const -> pid_t { return pid_; }
     auto state() const -> process_state { return state_; }
     auto step_instruction() -> xdb::stop_reason;
+    auto run_until_address(virt_addr address) -> stop_reason;
 
     // -- registers --
     auto get_registers() -> registers& { return *registers_; }

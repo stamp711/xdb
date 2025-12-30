@@ -15,7 +15,6 @@
 
 namespace xdb {
 
-/// Parses and provides access to the ELF binary
 class elf {
    public:
     elf(std::filesystem::path path);
@@ -32,7 +31,10 @@ class elf {
     auto header() const noexcept -> const Elf64_Ehdr& { return header_; }
 
     void notify_load_bias(virt_addr bias) noexcept { load_bias_ = bias; }
-    auto load_bias() const noexcept -> virt_addr { return load_bias_; }
+    auto load_bias() const -> virt_addr {
+        assert_load_bias_set_();
+        return load_bias_;
+    }
 
     // Section related
     auto get_section_header(std::string_view name) const -> const Elf64_Shdr*;

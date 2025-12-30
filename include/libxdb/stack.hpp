@@ -23,6 +23,8 @@ class stack {
     ///         (which itself is not inlined) at the beginning.
     auto inline_stack_at_pc() -> std::vector<die>;
 
+    void simulate_inlined_step_in() { --inline_height_; }
+
    private:
     target* target_;
     // std::vector<frame> frames_;
