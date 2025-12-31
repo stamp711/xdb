@@ -39,6 +39,9 @@ class target {
 
     auto line_entry_at_pc() const -> line_table::iterator;
 
+    auto get_stack() -> stack& { return stack_; }
+    auto get_stack() const -> const stack& { return stack_; }
+
     // Source-level stepping
     auto step_in() -> stop_reason;
     auto step_out() -> stop_reason;

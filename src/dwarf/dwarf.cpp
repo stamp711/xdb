@@ -137,7 +137,7 @@ auto dwarf::inline_stack_at_address(file_addr address) const -> std::vector<die>
     if (!func) return {};
 
     std::vector<die> stack;
-    stack.push_back(*func);
+    stack.push_back(*func);  // TODO: should we not include it?
 
     while (true) {
         // Recursively find inlined functions contains this address

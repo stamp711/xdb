@@ -9,6 +9,7 @@ namespace xdb {
 
 void stack::reset_inline_height() {
     auto inline_stack = this->inline_stack_at_pc();
+    inline_stack_size_ = inline_stack.size();
     inline_height_ = 0;
     auto fpc = target_->get_pc_file_address();
 
@@ -20,7 +21,7 @@ void stack::reset_inline_height() {
     }
 }
 
-auto stack::inline_stack_at_pc() -> std::vector<die> {
+auto stack::inline_stack_at_pc() const -> std::vector<die> {
     auto pc = target_->get_pc_file_address();
     if (!pc) return {};
     return pc->elf_file()->get_dwarf().inline_stack_at_address(*pc);

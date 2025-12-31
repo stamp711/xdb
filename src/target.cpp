@@ -1,6 +1,8 @@
+#include <cstdint>
 #include <libxdb/disassembler.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/process.hpp>
+#include <libxdb/register_info.hpp>
 #include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
@@ -95,15 +97,17 @@ auto target::step_over() -> stop_reason {
     // - If we are at a call instruction, step to the instruction immediately after the call
     // TODO: which takes priority?
 
-    auto orig_line = this->line_entry_at_pc();
-    disassembler dis(*this->process_);
     stop_reason reason;
 
+    auto orig_line = this->line_entry_at_pc();
+    disassembler dis(*this->process_);
+    auto& stack = this->get_stack();
+
     while (true) {
-        if (this->stack_.inline_height() > 0) {
-            // We are above in inlined subroutine, run to end of it
-            auto inline_stack = this->stack_.inline_stack_at_pc();
-            const auto& die_to_skip = inline_stack[inline_stack.size() - stack_.inline_height()];
+        if (stack.inline_height() > 0) {
+            // We are above an inlined subroutine, run to end of it
+            auto inline_stack = stack.inline_stack_at_pc();
+            const auto& die_to_skip = inline_stack[stack.current_index_in_inline_stack() + 1];
             auto end_addr = *die_to_skip.high_pc().to_virt_addr();
             reason = this->process_->run_until_address(end_addr);
             if (!reason.is_step() || this->process_->get_pc() != end_addr) return reason;
@@ -125,6 +129,26 @@ auto target::step_over() -> stop_reason {
     }
 
     return reason;
+}
+
+auto target::step_out() -> stop_reason {
+    // If we are in inlined subroutine, run to end of it
+    const auto& stack = this->get_stack();
+    bool at_inline_frame = stack.current_index_in_inline_stack() != 0;
+    if (at_inline_frame) {
+        const auto inline_stack = stack.inline_stack_at_pc();
+        const auto& curr_frame = inline_stack[stack.current_index_in_inline_stack()];
+        auto end_addr = *curr_frame.high_pc().to_virt_addr();
+        return this->process_->run_until_address(end_addr);
+    }
+
+    // Otherwise, step out of current function
+    //
+    // Use rbp as frame pointer for now. UB if -fomit-frame-pointer.
+    // TODO: do DWARF stack unwinding to determine return addr
+    auto rbp = process_->get_registers().read_by_id_as<uint64_t>(register_id::rbp);
+    auto return_addr = process_->read_memory_as<uint64_t>(virt_addr{rbp + 8});
+    return this->process_->run_until_address(virt_addr{return_addr});
 }
 
 }  // namespace xdb
