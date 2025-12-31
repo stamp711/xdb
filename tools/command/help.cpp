@@ -13,8 +13,11 @@ void print_help(std::span<const std::string> args) {
                   << "    catchpoint, catch  - Manage catchpoints (syscalls)\n"
                   << "    continue, c        - Resume the process\n"
                   << "    disassemble, disas - Disassemble instructions\n"
+                  << "    finish             - Step-out\n"
                   << "    memory, mem        - Memory operations\n"
+                  << "    next, n            - Step-over\n"
                   << "    register, reg      - Register operations\n"
+                  << "    step, s            - Step-in\n"
                   << "    stepi, si          - Single step an instruction\n"
                   << "    watchpoint, w      - Manage watchpoints\n";
     } else if (args[1] == "breakpoint" || args[1] == "b") {

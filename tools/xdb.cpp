@@ -257,6 +257,15 @@ void handle_command(std::unique_ptr<xdb::target>& target, std::string_view line)
     } else if (command == "stepi" || command == "si") {
         auto reason = process->step_instruction();
         handle_stop(*target, reason);
+    } else if (command == "step" || command == "s") {
+        auto reason = target->step_in();
+        handle_stop(*target, reason);
+    } else if (command == "next" || command == "n") {
+        auto reason = target->step_out();
+        handle_stop(*target, reason);
+    } else if (command == "finish") {
+        auto reason = target->step_out();
+        handle_stop(*target, reason);
     }
 
     else {
