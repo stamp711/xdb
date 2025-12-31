@@ -1,3 +1,5 @@
+#include <libxdb/detail/dwarf.h>
+
 #include <libxdb/error.hpp>
 #include <libxdb/stack.hpp>
 #include <libxdb/target.hpp>
@@ -11,8 +13,9 @@ void stack::reset_inline_height() {
     auto fpc = target_->get_pc_file_address();
 
     // Increment the inline height for each function beginning at the current PC
+    // TODO: should we count the DW_TAG_subprogram? Remember to check this when implementing bt.
     for (auto& die : inline_stack | std::views::reverse) {
-        if (die.low_pc() != fpc) break;
+        if (die.abbreviation().tag != DW_TAG_inlined_subroutine || die.low_pc() != fpc) break;
         ++inline_height_;
     }
 }

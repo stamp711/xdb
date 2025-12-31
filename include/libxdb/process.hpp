@@ -34,11 +34,12 @@ struct syscall_information {
 };
 
 struct stop_reason {
-    process_state state;
-    std::uint8_t info;
+    process_state state = process_state::stopped;
+    std::uint8_t info{};
     std::optional<trap_type> trap_reason;
     std::optional<syscall_information> syscall_info;
 
+    stop_reason() = default;
     stop_reason(int wait_status);
     stop_reason(process_state state_v, std::uint8_t info_v, std::optional<trap_type> trap_reason_v = std::nullopt,
                 std::optional<syscall_information> syscall_info_v = std::nullopt)

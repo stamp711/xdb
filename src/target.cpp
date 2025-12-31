@@ -1,3 +1,4 @@
+#include <libxdb/disassembler.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/target.hpp>
@@ -52,11 +53,13 @@ auto target::line_entry_at_pc() const -> line_table::iterator {
 }
 
 auto target::step_in() -> stop_reason {
+    // Simulate step if we are currently in an inlined function
     if (stack_.inline_height() > 0) {
         stack_.simulate_inlined_step_in();
         return {process_state::stopped, SIGTRAP, trap_type::single_step};
     }
 
+    // Step until we reach a different line table entry
     auto orig_line = this->line_entry_at_pc();
     while (true) {
         auto reason = process_->step_instruction();  // at least step a single instruction
@@ -64,21 +67,17 @@ auto target::step_in() -> stop_reason {
         if (!reason.is_step()) return reason;  // if stopped not because of step, return early
 
         auto line = this->line_entry_at_pc();
-
-        // no line table entry for current pc
-        if (line == line_table::iterator{} /* end */) break;
-
-        // line entry changed, and is not a special end-of-sequence entry
-        if (line != orig_line && !line->end_sequence) break;
+        if (line == line_table::iterator{} /* end */) break;  // no line table entry for current pc
+        if (line != orig_line && !line->end_sequence) break;  // line entry changed && not end-of-sequence entry
     }
 
-    // Step over the function prologue if needed
-    auto pc = get_pc_file_address();
+    // Step over function prologue if needed
+    auto pc = this->get_pc_file_address();
     if (pc) {
         auto func = pc->elf_file()->get_dwarf().function_containing_address(*pc);
         if (func && func->low_pc() == *pc) {
             // we are at start of a function (prologue)
-            auto line = line_entry_at_pc();
+            auto line = this->line_entry_at_pc();
             if (line != line_table::iterator{} /* end */) {
                 // GCC: first line table entry for a function marks the start of the prologue
                 ++line;
@@ -88,6 +87,44 @@ auto target::step_in() -> stop_reason {
     }
 
     return {process_state::stopped, SIGTRAP, trap_type::single_step};
+}
+
+auto target::step_over() -> stop_reason {
+    // Same as step_in, but:
+    // - If we are above an inlined function, step over it
+    // - If we are at a call instruction, step to the instruction immediately after the call
+    // TODO: which takes priority?
+
+    auto orig_line = this->line_entry_at_pc();
+    disassembler dis(*this->process_);
+    stop_reason reason;
+
+    while (true) {
+        if (this->stack_.inline_height() > 0) {
+            // We are above in inlined subroutine, run to end of it
+            auto inline_stack = this->stack_.inline_stack_at_pc();
+            const auto& die_to_skip = inline_stack[inline_stack.size() - stack_.inline_height()];
+            auto end_addr = *die_to_skip.high_pc().to_virt_addr();
+            reason = this->process_->run_until_address(end_addr);
+            if (!reason.is_step() || this->process_->get_pc() != end_addr) return reason;
+        } else if (auto instrs = dis.disassemble(2, process_->get_pc()); instrs[0].text.starts_with("call")) {
+            // We are at call instruction, run to next instruction
+            // It's also ok if the callee never returns.
+            auto return_addr = instrs[1].address;
+            reason = this->process_->run_until_address(return_addr);
+            if (!reason.is_step() || this->process_->get_pc() != return_addr) return reason;
+        } else {
+            // In other cases, just step to next instruction
+            reason = process_->step_instruction();
+            if (!reason.is_step()) return reason;
+        }
+
+        auto line = this->line_entry_at_pc();
+        if (line == line_table::iterator{} /* end */) break;  // no line table entry for current pc
+        if (line != orig_line && !line->end_sequence) break;  // line entry changed && not end-of-sequence entry
+    }
+
+    return reason;
 }
 
 }  // namespace xdb
