@@ -12,7 +12,8 @@ class stack {
 
     auto get_target() const -> const target& { return *target_; }
 
-    /// How many inlined frames are we currently above?
+    auto has_inlined_frames() const -> bool { return inline_stack_size_ > 1; }  // first item is the outermost function
+    /// How many inlined frames do we currently above?
     auto inline_height() const -> size_t { return inline_height_; }
     auto current_index_in_inline_stack() const -> size_t { return inline_stack_size_ - inline_height_ - 1; }
 

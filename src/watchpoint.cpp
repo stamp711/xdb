@@ -31,10 +31,12 @@ void watchpoint::enable() {
 }
 
 void watchpoint::disable() {
-    if (is_enabled_) {
-        process_->clear_hardware_stoppoint_(hardware_register_index_);
-        is_enabled_ = false;
+    if (!is_enabled_ || process_->state() == process_state::exited || process_->state() == process_state::terminated) {
+        return;
     }
+
+    process_->clear_hardware_stoppoint_(hardware_register_index_);
+    is_enabled_ = false;
 }
 
 void watchpoint::record_data_change() {

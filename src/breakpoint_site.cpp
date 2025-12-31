@@ -47,7 +47,9 @@ void xdb::breakpoint_site::enable() {
 }
 
 void xdb::breakpoint_site::disable() {
-    if (!is_enabled_) return;
+    if (!is_enabled_ || process_->state() == process_state::exited || process_->state() == process_state::terminated) {
+        return;
+    }
 
     if (is_hardware_) {
         process_->clear_hardware_stoppoint_(hardware_register_index_);

@@ -18,7 +18,7 @@ auto range_list::contains(file_addr addr) const -> bool {
 }
 
 range_list::iterator::iterator(const compile_unit& cu, std::span<const std::byte> data, file_addr base_address)
-    : cu_(&cu), data_(data), base_address_(base_address) {
+    : cu_(&cu), data_(data), base_address_(base_address), pos_(data.data()) {
     ++(*this);
 }
 
@@ -63,12 +63,14 @@ auto range_list::iterator::operator++() -> range_list::iterator& {
             case DW_RLE_offset_pair: {
                 current_.low = base_address_ + cur.get_uleb128();
                 current_.high = base_address_ + cur.get_uleb128();
+                pos_ = cur.data();
                 yield = true;
                 break;
             }
 
             case DW_RLE_base_address: {
                 base_address_ = file_addr(elf, cur.get_u64());
+                pos_ = cur.data();
                 yield = false;
                 break;
             }
@@ -76,6 +78,7 @@ auto range_list::iterator::operator++() -> range_list::iterator& {
             case DW_RLE_start_end: {
                 current_.low = file_addr(elf, cur.get_u64());
                 current_.high = file_addr(elf, cur.get_u64());
+                pos_ = cur.data();
                 yield = true;
                 break;
             }
@@ -83,6 +86,7 @@ auto range_list::iterator::operator++() -> range_list::iterator& {
             case DW_RLE_start_length: {
                 current_.low = base_address_ + cur.get_u64();
                 current_.high = current_.low + cur.get_uleb128();
+                pos_ = cur.data();
                 yield = true;
                 break;
             }

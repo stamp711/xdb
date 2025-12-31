@@ -261,7 +261,7 @@ void handle_command(std::unique_ptr<xdb::target>& target, std::string_view line)
         auto reason = target->step_in();
         handle_stop(*target, reason);
     } else if (command == "next" || command == "n") {
-        auto reason = target->step_out();
+        auto reason = target->step_over();
         handle_stop(*target, reason);
     } else if (command == "finish") {
         auto reason = target->step_out();

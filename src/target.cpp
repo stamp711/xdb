@@ -26,7 +26,7 @@ auto target::launch(const std::filesystem::path& path, std::optional<int> stdout
     auto process = process::launch(path, true, stdout_replacement);
     auto elf = create_loaded_elf(*process, path);
     auto t = std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
-    process->set_target(*t);
+    t->get_process().set_target(*t);
     return t;
 }
 
@@ -35,7 +35,7 @@ auto target::attach(pid_t pid) -> std::unique_ptr<target> {
     auto elf_path = std::filesystem::path("/proc") / std::to_string(pid) / "exe";
     auto elf = create_loaded_elf(*process, elf_path);
     auto t = std::unique_ptr<target>(new target(std::move(process), std::move(elf)));
-    process->set_target(*t);
+    t->get_process().set_target(*t);
     return t;
 }
 
@@ -55,9 +55,11 @@ auto target::line_entry_at_pc() const -> line_table::iterator {
 }
 
 auto target::step_in() -> stop_reason {
+    auto& stack = this->get_stack();
+
     // Simulate step if we are currently in an inlined function
-    if (stack_.inline_height() > 0) {
-        stack_.simulate_inlined_step_in();
+    if (stack.inline_height() > 0) {
+        stack.simulate_inlined_step_in();
         return {process_state::stopped, SIGTRAP, trap_type::single_step};
     }
 
@@ -104,7 +106,7 @@ auto target::step_over() -> stop_reason {
     auto& stack = this->get_stack();
 
     while (true) {
-        if (stack.inline_height() > 0) {
+        if (stack.has_inlined_frames() && stack.inline_height() > 0) {
             // We are above an inlined subroutine, run to end of it
             auto inline_stack = stack.inline_stack_at_pc();
             const auto& die_to_skip = inline_stack[stack.current_index_in_inline_stack() + 1];
@@ -134,7 +136,7 @@ auto target::step_over() -> stop_reason {
 auto target::step_out() -> stop_reason {
     // If we are in inlined subroutine, run to end of it
     const auto& stack = this->get_stack();
-    bool at_inline_frame = stack.current_index_in_inline_stack() != 0;
+    bool at_inline_frame = stack.has_inlined_frames() && stack.current_index_in_inline_stack() != 0;
     if (at_inline_frame) {
         const auto inline_stack = stack.inline_stack_at_pc();
         const auto& curr_frame = inline_stack[stack.current_index_in_inline_stack()];

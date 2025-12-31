@@ -313,7 +313,7 @@ auto process::step_instruction() -> stop_reason {
 auto process::run_until_address(virt_addr address) -> stop_reason {
     // Run until address by setting a temporary breakpoint
     breakpoint_site* breakpoint_to_remove = nullptr;
-    if (this->breakpoint_sites_.contains_address(address)) {
+    if (!this->breakpoint_sites_.contains_address(address)) {
         breakpoint_to_remove = &this->create_breakpoint_site(address, false, /* internal */ true);
         breakpoint_to_remove->enable();
     }

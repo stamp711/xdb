@@ -11,6 +11,8 @@ set_target_properties(
 
 target_compile_features(libxdb PUBLIC cxx_std_20)
 
+target_compile_options(libxdb PRIVATE -g -Wall -Wextra -Werror)
+
 target_link_libraries(libxdb PRIVATE Zydis::Zydis)
 
 target_include_directories(

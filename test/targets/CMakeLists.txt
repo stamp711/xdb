@@ -22,4 +22,7 @@ add_test_cpp_target(anti_debugger anti_debugger.cpp)
 add_test_cpp_target(multi_cu multi_cu_main.cpp multi_cu_other.cpp)
 
 add_test_cpp_target(inlining inlining.cpp)
-target_compile_options(inlining PRIVATE -O3)
+target_compile_options(
+    inlining
+    PRIVATE -O3 -fno-omit-frame-pointer -fno-optimize-sibling-calls
+)

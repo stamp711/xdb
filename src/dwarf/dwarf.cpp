@@ -163,7 +163,8 @@ auto dwarf::index_() const -> void {
 auto dwarf::index_die_(const die& die) const -> void {
     bool is_function =
         die.abbreviation().tag == DW_TAG_subprogram || die.abbreviation().tag == DW_TAG_inlined_subroutine;
-    bool has_range = die.contains(DW_AT_low_pc) && die.contains(DW_AT_high_pc);  // to filter out indirect DIEs
+    bool has_range = die.contains(DW_AT_ranges) ||
+                     (die.contains(DW_AT_low_pc) && die.contains(DW_AT_high_pc));  // to filter out indirect DIEs
 
     if (is_function && has_range) {
         auto name = die.name();
