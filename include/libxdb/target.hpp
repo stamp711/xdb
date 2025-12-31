@@ -47,6 +47,13 @@ class target {
     auto step_out() -> stop_reason;
     auto step_over() -> stop_reason;
 
+    struct find_functions_result {
+        std::vector<die> dwarf_functions;
+        std::vector<std::pair<const elf*, const Elf64_Sym*>> elf_functions;
+    };
+    /// Find functions with the given name using DWARF info, fallback to ELF symbols if not found.
+    auto find_functions(const std::string& name) const -> find_functions_result;
+
    private:
     target(std::unique_ptr<process> proc, std::unique_ptr<elf> obj)
         : process_(std::move(proc)), elf_(std::move(obj)), stack_(*this) {}

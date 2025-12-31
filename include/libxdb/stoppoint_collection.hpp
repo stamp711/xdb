@@ -19,10 +19,12 @@ concept StoppointLike = requires(const T t) {
     { t.disable() } -> std::same_as<void>;
 } && std::equality_comparable<typename T::id_type>;
 
-template <StoppointLike Stoppoint>
+template <StoppointLike Stoppoint, bool Owning = true>
 class stoppoint_collection {
    public:
-    auto push(std::unique_ptr<Stoppoint> sp) -> Stoppoint& {
+    using pointer_type = std::conditional_t<Owning, std::unique_ptr<Stoppoint>, Stoppoint*>;
+
+    auto push(pointer_type sp) -> Stoppoint& {
         stoppoints_.push_back(std::move(sp));
         return *stoppoints_.back();
     }
@@ -90,7 +92,7 @@ class stoppoint_collection {
     auto empty() const -> bool { return stoppoints_.empty(); }
 
    private:
-    using points_t = std::vector<std::unique_ptr<Stoppoint>>;
+    using points_t = std::vector<pointer_type>;
 
     template <typename Collection>
     static auto get_by_id_impl(Collection& self, typename Stoppoint::id_type id) -> auto& {
@@ -116,7 +118,7 @@ class stoppoint_collection {
             result;
         for (auto& stoppoint : self.stoppoints_) {
             if (stoppoint->in_range(start, end)) {
-                result.emplace_back(stoppoint.get());
+                result.emplace_back(&*stoppoint);
             }
         }
         return result;

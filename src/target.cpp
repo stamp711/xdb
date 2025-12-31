@@ -153,4 +153,19 @@ auto target::step_out() -> stop_reason {
     return this->process_->run_until_address(virt_addr{return_addr});
 }
 
+auto target::find_functions(const std::string& name) const -> find_functions_result {
+    find_functions_result res;
+
+    // try to find functions in DWARF debug info first
+    res.dwarf_functions = elf_->get_dwarf().find_functions(name);
+    // if not found, find in ELF symbols
+    if (res.dwarf_functions.empty()) {
+        for (const auto* sym : elf_->get_symbols_by_name(name)) {
+            res.elf_functions.emplace_back(elf_.get(), sym);
+        }
+    }
+
+    return res;
+}
+
 }  // namespace xdb

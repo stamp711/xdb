@@ -1,6 +1,7 @@
 #include <sys/ptrace.h>
 
 #include <cstddef>
+#include <libxdb/breakpoint.hpp>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/process.hpp>
@@ -8,8 +9,8 @@
 
 namespace {
 
-auto get_next_id() {
-    static std::int32_t current_id = 0;
+auto get_next_id() -> int32_t {
+    static xdb::breakpoint_site::id_type current_id = 0;
     return ++current_id;
 }
 
@@ -31,6 +32,17 @@ xdb::breakpoint_site::breakpoint_site(process& proc, virt_addr address, bool is_
       is_internal_(is_internal) {
     id_ = is_internal_ ? -1 : get_next_id();
 }
+
+xdb::breakpoint_site::breakpoint_site(breakpoint& parent, id_type id, process& proc, virt_addr address,
+                                      bool is_hardware, bool is_internal)
+    : id_(id),
+      process_(&proc),
+      address_(address),
+      is_enabled_(false),
+      original_byte_{},
+      is_hardware_(is_hardware),
+      is_internal_(is_internal),
+      parent_(&parent) {}
 
 void xdb::breakpoint_site::enable() {
     if (is_enabled_) return;

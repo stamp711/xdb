@@ -132,7 +132,10 @@ class process {
     }
 
     // -- breakpoint sites --
-    auto create_breakpoint_site(virt_addr addr, bool hardware = false, bool internal = false) -> breakpoint_site&;
+    auto create_breakpoint_site(virt_addr va, bool hardware = false, bool internal = false) -> breakpoint_site&;
+    auto create_breakpoint_site(breakpoint& parent, breakpoint_site::id_type id, virt_addr va, bool hardware = false,
+                                bool internal = false) -> breakpoint_site&;
+
     auto breakpoint_sites() -> stoppoint_collection<breakpoint_site>& { return breakpoint_sites_; }
     auto breakpoint_sites() const -> const stoppoint_collection<breakpoint_site>& { return breakpoint_sites_; }
 

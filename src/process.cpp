@@ -460,11 +460,20 @@ void process::write_memory(virt_addr addr, std::span<const std::byte> data) {
     }
 }
 
-auto process::create_breakpoint_site(virt_addr address, bool hardware, bool internal) -> breakpoint_site& {
-    if (breakpoint_sites_.contains_address(address)) {
-        error::send("Breakpoint site already exists at address " + std::to_string(address.addr()));
+auto process::create_breakpoint_site(virt_addr va, bool hardware, bool internal) -> breakpoint_site& {
+    if (breakpoint_sites_.contains_address(va)) {
+        error::send("Breakpoint site already exists at address " + std::to_string(va.addr()));
     }
-    auto bp_site = std::unique_ptr<breakpoint_site>(new breakpoint_site(*this, address, hardware, internal));
+    auto bp_site = std::unique_ptr<breakpoint_site>(new breakpoint_site(*this, va, hardware, internal));
+    return breakpoint_sites_.push(std::move(bp_site));
+}
+
+auto process::create_breakpoint_site(breakpoint& parent, breakpoint_site::id_type id, virt_addr va, bool hardware,
+                                     bool internal) -> breakpoint_site& {
+    if (breakpoint_sites_.contains_address(va)) {
+        error::send("Breakpoint site already exists at address " + std::to_string(va.addr()));
+    }
+    auto bp_site = std::unique_ptr<breakpoint_site>(new breakpoint_site(parent, id, *this, va, hardware, internal));
     return breakpoint_sites_.push(std::move(bp_site));
 }
 
