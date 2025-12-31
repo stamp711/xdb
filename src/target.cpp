@@ -1,4 +1,5 @@
 #include <cstdint>
+#include <libxdb/breakpoint.hpp>
 #include <libxdb/disassembler.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/process.hpp>
@@ -6,6 +7,7 @@
 #include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
+#include <utility>
 
 namespace {
 
@@ -166,6 +168,23 @@ auto target::find_functions(const std::string& name) const -> find_functions_res
     }
 
     return res;
+}
+
+auto target::create_function_breakpoint(std::string function_name, bool hardware, bool internal) -> breakpoint& {
+    auto bp = std::unique_ptr<function_breakpoint>(
+        new function_breakpoint(*this, std::move(function_name), hardware, internal));
+    return breakpoints_.push(std::move(bp));
+}
+
+auto target::create_line_breakpoint(std::filesystem::path file, std::size_t line, bool hardware, bool internal)
+    -> breakpoint& {
+    auto bp = std::unique_ptr<line_breakpoint>(new line_breakpoint(*this, std::move(file), line, hardware, internal));
+    return breakpoints_.push(std::move(bp));
+}
+
+auto target::create_address_breakpoint(virt_addr addr, bool hardware, bool internal) -> breakpoint& {
+    auto bp = std::unique_ptr<address_breakpoint>(new address_breakpoint(*this, addr, hardware, internal));
+    return breakpoints_.push(std::move(bp));
 }
 
 }  // namespace xdb

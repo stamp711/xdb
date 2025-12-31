@@ -1,9 +1,11 @@
 #pragma once
 
+#include <libxdb/breakpoint.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/process.hpp>
 #include <libxdb/stack.hpp>
+#include <libxdb/stoppoint_collection.hpp>
 #include <libxdb/types.hpp>
 
 namespace xdb {
@@ -54,6 +56,15 @@ class target {
     /// Find functions with the given name using DWARF info, fallback to ELF symbols if not found.
     auto find_functions(const std::string& name) const -> find_functions_result;
 
+    auto create_function_breakpoint(std::string function_name, bool hardware = false, bool internal = false)
+        -> breakpoint&;
+    auto create_line_breakpoint(std::filesystem::path file, std::size_t line, bool hardware = false,
+                                bool internal = false) -> breakpoint&;
+    auto create_address_breakpoint(virt_addr addr, bool hardware = false, bool internal = false) -> breakpoint&;
+
+    auto breakpoints() -> auto& { return breakpoints_; }
+    auto breakpoints() const -> const auto& { return breakpoints_; }
+
    private:
     target(std::unique_ptr<process> proc, std::unique_ptr<elf> obj)
         : process_(std::move(proc)), elf_(std::move(obj)), stack_(*this) {}
@@ -61,6 +72,7 @@ class target {
     std::unique_ptr<process> process_;
     std::unique_ptr<elf> elf_;
     stack stack_;
+    stoppoint_collection<breakpoint> breakpoints_;
 };
 
 }  // namespace xdb

@@ -19,7 +19,7 @@ concept StoppointLike = requires(const T t) {
     { t.disable() } -> std::same_as<void>;
 } && std::equality_comparable<typename T::id_type>;
 
-template <StoppointLike Stoppoint, bool Owning = true>
+template <typename Stoppoint, bool Owning = true>
 class stoppoint_collection {
    public:
     using pointer_type = std::conditional_t<Owning, std::unique_ptr<Stoppoint>, Stoppoint*>;
