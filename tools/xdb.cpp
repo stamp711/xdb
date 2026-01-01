@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
 #include <libxdb/breakpoint_site.hpp>
 #include <libxdb/disassembler.hpp>

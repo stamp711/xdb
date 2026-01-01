@@ -18,6 +18,7 @@
 #include <libxdb/process.hpp>
 #include <libxdb/register_info.hpp>
 #include <libxdb/syscalls.hpp>
+#include <libxdb/target.hpp>
 #include <libxdb/types.hpp>
 #include <memory>
 #include <regex>
@@ -677,4 +678,44 @@ TEST_CASE("Line table", "[dwarf]") {
     REQUIRE((++it)->line == 6);  // }
     REQUIRE((++it)->end_sequence);
     REQUIRE(++it == line_table.end());
+}
+
+TEST_CASE("Source-level breakpoints", "[breakpoint]") {
+    auto dev_null = open("/dev/null", O_WRONLY);
+    auto target = xdb::target::launch(test_path() / "targets/overloaded", dev_null);
+    auto& proc = target->get_process();
+
+    target->create_line_breakpoint("overloaded.cpp", 10).enable();  // main
+
+    proc.resume();
+    proc.wait_on_signal();
+
+    auto entry = target->line_entry_at_pc();
+    REQUIRE(entry->file_entry->path.filename() == "overloaded.cpp");
+    REQUIRE(entry->line == 10);
+
+    auto& bp = target->create_function_breakpoint("print_type");
+    bp.enable();
+
+    xdb::breakpoint_site* lowest_bp_site = nullptr;
+    bp.breakpoint_sites().for_each([&lowest_bp_site](auto& site) -> void {
+        if (lowest_bp_site == nullptr || site.address().addr() < lowest_bp_site->address().addr()) {
+            lowest_bp_site = &site;
+        }
+    });
+    lowest_bp_site->disable();
+
+    proc.resume();
+    proc.wait_on_signal();
+    REQUIRE(target->line_entry_at_pc()->line == 6);
+
+    proc.resume();
+    proc.wait_on_signal();
+    REQUIRE(target->line_entry_at_pc()->line == 8);
+
+    proc.resume();
+    auto reason = proc.wait_on_signal();
+    REQUIRE(reason.state == xdb::process_state::exited);
+
+    close(dev_null);
 }

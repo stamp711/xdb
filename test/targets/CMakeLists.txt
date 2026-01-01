@@ -26,3 +26,5 @@ target_compile_options(
     inlining
     PRIVATE -O3 -fno-omit-frame-pointer -fno-optimize-sibling-calls
 )
+
+add_test_cpp_target(overloaded overloaded.cpp)

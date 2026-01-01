@@ -54,7 +54,14 @@ auto line_table::iterator::operator++() -> iterator& {
 
     while (!execute_instruction_());  // until emitted
 
-    current_.file_entry = &table_->file_names_[current_.file - 1];
+    // Debug print the current entry register values
+    // fmt::print("Current Entry Register Values:\n");
+    // fmt::print("  Address: 0x{:x}\n", registers_.address.addr());
+    // fmt::print("  File: {}\n", current_.file);
+    // fmt::print("  Line: {}\n", current_.line);
+    // fmt::print("  Column: {}\n", current_.column);
+
+    current_.file_entry = &table_->file_names_[current_.file];
     return *this;
 }
 
@@ -111,35 +118,35 @@ auto line_table::iterator::execute_instruction_() -> bool {
                 // specified in Section 6.2.5.1 on page 160.
                 //
                 // We only support minimum_instruction_length and maximum_operations_per_instruction = 1
-                current_.address += cur.get_uleb128();
+                registers_.address += cur.get_uleb128();
                 break;
             }
             case DW_LNS_advance_line: {
                 // The DW_LNS_advance_line opcode takes a single signed LEB128 operand
                 // and adds that value to the line register of the state machine.
-                auto line = static_cast<int64_t>(current_.line) + cur.get_sleb128();
+                auto line = static_cast<int64_t>(registers_.line) + cur.get_sleb128();
                 if (line < 0) error::send("line register becomes negative");
-                current_.line = static_cast<uint64_t>(line);
+                registers_.line = static_cast<uint64_t>(line);
                 break;
             }
             case DW_LNS_set_file: {
-                current_.file = cur.get_uleb128();
+                registers_.file = cur.get_uleb128();
                 break;
             }
             case DW_LNS_set_column: {
-                current_.column = cur.get_uleb128();
+                registers_.column = cur.get_uleb128();
                 break;
             }
             case DW_LNS_negate_stmt: {
                 // The DW_LNS_negate_stmt opcode takes no operands. It sets the is_stmt
                 // register of the state machine to the logical negation of its current value.
-                current_.is_stmt = !current_.is_stmt;
+                registers_.is_stmt = !registers_.is_stmt;
                 break;
             }
             case DW_LNS_set_basic_block: {
                 // The DW_LNS_set_basic_block opcode takes no operands. It sets the
                 // basic_block register of the state machine to “true.”
-                current_.basic_block = true;
+                registers_.basic_block = true;
                 break;
             }
             case DW_LNS_const_add_pc: {

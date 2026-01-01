@@ -1,7 +1,5 @@
 #pragma once
 
-#include <fmt/ostream.h>
-
 #include <cstdint>
 #include <filesystem>
 #include <libxdb/types.hpp>
