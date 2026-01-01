@@ -7,8 +7,8 @@ auto path_ends_in(const std::filesystem::path& lhs, const std::filesystem::path&
     auto size_lhs = std::distance(lhs.begin(), lhs.end());
     auto size_rhs = std::distance(rhs.begin(), rhs.end());
     if (size_rhs > size_lhs) return false;
-    auto rhs_start = std::next(rhs.begin(), size_lhs - size_rhs);
-    return std::equal(rhs_start, rhs.end(), lhs.begin());
+    auto lhs_start = std::next(lhs.begin(), size_lhs - size_rhs);
+    return std::equal(lhs_start, lhs.end(), rhs.begin());
 }
 
 }  // namespace xdb

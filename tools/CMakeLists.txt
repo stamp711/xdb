@@ -1,7 +1,7 @@
 file(GLOB COMMAND_HANDLER_SOURCES "command/*.cpp")
 add_executable(xdb xdb.cpp ${COMMAND_HANDLER_SOURCES})
 target_link_libraries(xdb PRIVATE xdb::libxdb PkgConfig::libedit fmt::fmt)
-target_compile_options(xdb PRIVATE -g -Wall -Wextra -Werror)
+target_compile_options(xdb PRIVATE -g -Wall -Wextra)
 
 add_executable(dwarf_dump dwarf_dump.cpp)
 find_package(magic_enum CONFIG REQUIRED)

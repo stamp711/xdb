@@ -37,6 +37,8 @@ class breakpoint {
 
     /// Resolve the breakpoint by creating breakpoint sites.
     /// When new shared library is loaded, make sure to resolve the breakpoint again.
+    ///
+    /// TODO: Correctly handle when multiple breakpoints has same resolved breakpoint site address
     virtual void resolve() = 0;
 
     auto breakpoint_sites() -> auto& { return breakpoint_sites_; }
