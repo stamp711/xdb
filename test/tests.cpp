@@ -719,3 +719,47 @@ TEST_CASE("Source-level breakpoints", "[breakpoint]") {
 
     close(dev_null);
 }
+
+TEST_CASE("Source-level stepping", "[target]") {
+    auto dev_null = open("/dev/null", O_WRONLY);
+    auto target = xdb::target::launch(test_path() / "targets/step", dev_null);
+    auto& proc = target->get_process();
+
+    target->create_function_breakpoint("main").enable();
+    proc.resume();
+    proc.wait_on_signal();
+
+    auto pc = proc.get_pc();
+    REQUIRE(target->function_name_at_address(pc) == "main");
+
+    target->step_over();
+
+    auto new_pc = proc.get_pc();
+    REQUIRE(new_pc != pc);
+    REQUIRE(target->function_name_at_address(new_pc) == "main");
+
+    target->step_in();
+
+    pc = proc.get_pc();
+    REQUIRE(target->function_name_at_address(pc) == "noinline");
+    REQUIRE(target->get_stack().inline_height() == 2);
+
+    target->step_in();
+
+    new_pc = proc.get_pc();
+    REQUIRE(new_pc == pc);
+    REQUIRE(target->get_stack().inline_height() == 1);
+
+    target->step_out();
+
+    new_pc = proc.get_pc();
+    REQUIRE(new_pc != pc);
+    REQUIRE(target->function_name_at_address(pc) == "noinline");
+
+    target->step_out();
+
+    pc = proc.get_pc();
+    REQUIRE(target->function_name_at_address(pc) == "main");
+
+    close(dev_null);
+}

@@ -28,3 +28,4 @@ target_compile_options(
 )
 
 add_test_cpp_target(overloaded overloaded.cpp)
+add_test_cpp_target(step step.cpp)
