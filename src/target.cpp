@@ -1,3 +1,5 @@
+#include <cxxabi.h>
+
 #include <cstdint>
 #include <libxdb/breakpoint.hpp>
 #include <libxdb/disassembler.hpp>
@@ -168,6 +170,26 @@ auto target::find_functions(const std::string& name) const -> find_functions_res
     }
 
     return res;
+}
+
+auto target ::function_name_at_address(virt_addr va) const -> std::string {
+    auto ofa = va.to_file_addr(*elf_);
+    if (!ofa) return "";
+    auto fa = ofa.value();
+    const auto* obj = fa.elf_file();
+
+    auto func = obj->get_dwarf().function_containing_address(fa);
+    if (func && func->name()) {
+        return std::string{*func->name()};
+    }
+    const auto* elf_sym = obj->get_symbol_containing_file_addr(fa);
+    if (elf_sym != nullptr && ELF64_ST_TYPE(elf_sym->st_info) == STT_FUNC) {
+        auto elf_name = std::string{obj->get_string(elf_sym->st_name)};
+        std::unique_ptr<char> p;
+        p.reset(abi::__cxa_demangle(elf_name.c_str(), nullptr, nullptr, nullptr));
+        return p ? p.get() : elf_name;
+    }
+    return "";
 }
 
 auto target::create_function_breakpoint(std::string function_name, bool hardware, bool internal) -> breakpoint& {

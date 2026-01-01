@@ -178,7 +178,18 @@ auto get_sigtrap_info(const xdb::process& process, const xdb::stop_reason& reaso
 
 auto generate_signal_stop_reason(const xdb::target& target, const xdb::stop_reason& reason) -> std::string {
     auto message =
-        fmt::format("stopped by signal {} at {:#x}", sigabbrev_np(reason.info), target.get_process().get_pc().addr());
+        fmt::format("stopped by signal {}, {:#x}", sigabbrev_np(reason.info), target.get_process().get_pc().addr());
+
+    auto func_name = target.function_name_at_address(target.get_process().get_pc());
+    if (func_name != "") {
+        message += fmt::format(" in {} ()", func_name);
+    }
+
+    auto line = target.line_entry_at_pc();
+    if (line != xdb::line_table::iterator()) {
+        auto file = line->file_entry->path.filename();
+        message += fmt::format(" at {}:{}", file.string(), line->line);
+    }
 
     if (reason.info == SIGTRAP) {
         message += get_sigtrap_info(target.get_process(), reason);
@@ -214,16 +225,47 @@ void print_stop_reason(const xdb::target& target, const xdb::stop_reason& reason
     }
 }
 
+void print_source(const std::filesystem::path& path, uint64_t line, uint64_t n_lines_context) {
+    std::ifstream file{path.string()};
+    auto start_line = line <= n_lines_context ? 1 : line - n_lines_context;
+    auto end_line = line + n_lines_context + 1;
+
+    auto print_line_start = [line, end_line](auto current_line) -> void {
+        auto fill_width = static_cast<int>(std::floor(std::log10(end_line))) + 1;
+        auto arrow = current_line == line ? ">" : " ";
+        fmt::print("{} {:>{}} ", arrow, current_line, fill_width);
+    };
+
+    char c{};
+    uint64_t current_line = 1;
+    while (current_line != start_line && file.get(c)) {
+        if (c == '\n') {
+            ++current_line;
+        }
+    }
+
+    print_line_start(current_line);
+    while (current_line != end_line && file.get(c)) {
+        std::cout << c;
+        if (c == '\n') {
+            ++current_line;
+            print_line_start(current_line);
+        }
+    }
+    std::cout << '\n';
+}
+
 void handle_stop(xdb::target& target, xdb::stop_reason reason) {
     print_stop_reason(target, reason);
     if (reason.state == xdb::process_state::stopped) {
-        const auto* func = target.get_elf().get_symbol_containing_virt_addr(target.get_process().get_pc());
-        if (func != nullptr && ELF64_ST_TYPE(func->st_info) == STT_FUNC) {
-            auto func_name = target.get_elf().get_string(func->st_name);
-            fmt::println("In function {}:", func_name);
+        if (target.get_stack().inline_height() > 0) {
+            auto frame = target.get_stack().current_frame_of_inline_stack();
+            print_source(frame.file().path, frame.line(), 3);
+        } else if (auto entry = target.line_entry_at_pc(); entry != xdb::line_table::iterator()) {
+            print_source(entry->file_entry->path, entry->line, 3);
+        } else {
+            xdb_handlers::print_disassembly(target.get_process(), target.get_process().get_pc(), 5);
         }
-        constexpr std::size_t instr_cnt = 5;
-        xdb_handlers::print_disassembly(target.get_process(), target.get_process().get_pc(), instr_cnt);
     }
 }
 

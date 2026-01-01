@@ -56,6 +56,8 @@ class target {
     /// Find functions with the given name using DWARF info, fallback to ELF symbols if not found.
     auto find_functions(const std::string& name) const -> find_functions_result;
 
+    auto function_name_at_address(virt_addr va) const -> std::string;
+
     auto create_function_breakpoint(std::string function_name, bool hardware = false, bool internal = false)
         -> breakpoint&;
     auto create_line_breakpoint(std::filesystem::path file, std::size_t line, bool hardware = false,
