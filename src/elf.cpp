@@ -106,9 +106,7 @@ auto elf::get_section_contents(std::string_view name) const -> std::span<const s
 
 auto elf::get_section_start_file_addr(std::string_view name) const -> std::optional<file_addr> {
     const auto* shdr = get_section_header(name);
-    if (shdr == nullptr) {
-        return std::nullopt;
-    }
+    if (shdr == nullptr) return std::nullopt;
     return file_addr(*this, shdr->sh_offset);
 }
 

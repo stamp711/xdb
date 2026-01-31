@@ -4,6 +4,8 @@
 
 namespace xdb {
 
+auto file_offset::as_data_pointer() const -> const std::byte* { return elf_->file_offset_as_data_pointer(*this); }
+
 auto file_addr::to_virt_addr() const -> std::optional<virt_addr> {
     const auto* shdr = elf_->get_section_header_containing_file_addr(*this);
     if (shdr == nullptr) return std::nullopt;

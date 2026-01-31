@@ -36,6 +36,11 @@ class elf {
         return load_bias_;
     }
 
+    auto data_pointer_as_file_offset(const std::byte* ptr) const -> file_offset {
+        return file_offset{*this, static_cast<uint64_t>(ptr - data_)};
+    }
+    auto file_offset_as_data_pointer(file_offset offset) const -> const std::byte* { return data_ + offset.offset(); }
+
     // Section related
     auto get_section_header(std::string_view name) const -> const Elf64_Shdr*;
     auto get_section_contents(std::string_view name) const -> std::span<const std::byte>;

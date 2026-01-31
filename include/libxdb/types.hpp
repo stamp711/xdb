@@ -1,3 +1,41 @@
+/// @file types.hpp
+/// @brief Core address types for the debugger.
+///
+/// ## Address Spaces
+///
+/// The debugger deals with multiple address spaces:
+///
+/// ```
+///                     Debuggee Process
+///                     ┌─────────────────────────┐
+///    virt_addr ──────►│  Running program memory │
+///                     │  (ptrace read/write)    │
+///                     └─────────────────────────┘
+///                               ▲
+///                               │ + load_bias
+///                               │
+///                     ┌─────────────────────────┐
+///    file_addr ──────►│  ELF virtual addresses  │
+///                     │  (sh_addr, st_value)    │
+///                     └─────────────────────────┘
+///
+///                     ┌─────────────────────────┐
+///    file_offset ────►│  Offset in ELF file     │
+///                     │  (sh_offset)            │
+///                     └─────────────────────────┘
+///                               │
+///                               │ + elf::data_
+///                               ▼
+///                     ┌─────────────────────────┐
+///    std::byte* ─────►│  Debugger's mmap'd ELF  │
+///                     └─────────────────────────┘
+/// ```
+///
+/// - `virt_addr`: Runtime address in debuggee. Not tied to any ELF.
+/// - `file_addr`: Static address from ELF. Tied to a specific ELF.
+/// - `file_offset`: Byte offset in ELF file. Tied to a specific ELF.
+/// - `std::byte*`: Raw pointer in debugger's address space (mmapped ELF data).
+
 #pragma once
 
 #include <array>
@@ -19,19 +57,39 @@ using byte128 = std::array<std::byte, BYTE128_SIZE>;
 class elf;
 class virt_addr;
 
-// Absolute offset from the start of the object file
+/// Byte offset from the start of an (mmaped) ELF file.
+///
+/// Used for navigating ELF file structure (e.g., sh_offset in section headers).
+/// Associated with a specific ELF file and can be converted to a pointer into
+/// the debugger's mmapped ELF data via as_data_pointer().
+///
+/// @note This is NOT an address - it's an offset within the ELF file on disk.
 class file_offset {
    public:
     explicit file_offset(const elf& obj, std::uint64_t offset) : elf_(&obj), offset_(offset) {}
     auto offset() const noexcept -> std::uint64_t { return offset_; }
     auto elf_file() const noexcept -> const elf* { return elf_; }
 
+    auto operator+(std::uint64_t offset) const noexcept -> file_offset { return file_offset{*elf_, offset_ + offset}; }
+    auto operator-(std::uint64_t offset) const noexcept -> file_offset { return file_offset{*elf_, offset_ - offset}; }
+
+    /// Convert to a data pointer within the mmaped elf file.
+    /// @return Pointer to the byte at this offset in the debugger's mmapped ELF data.
+    auto as_data_pointer() const -> const std::byte*;
+
    private:
     const elf* elf_ = nullptr;
     std::uint64_t offset_;
 };
 
-// Virtual address specified in the ELF file
+/// Virtual address as specified in an ELF file (pre-relocation).
+///
+/// Represents addresses found in ELF metadata: symbol values (st_value),
+/// section virtual addresses (sh_addr), DWARF debug info, etc.
+/// Associated with a specific ELF file. To get the runtime address in the
+/// debuggee process, convert to virt_addr by adding the load bias.
+///
+/// @see virt_addr for runtime addresses in the debuggee process.
 class file_addr {
    public:
     file_addr(const elf& elf, std::uint64_t addr) : elf_(&elf), addr_(addr) {}
@@ -69,7 +127,14 @@ class file_addr {
     std::uint64_t addr_ = 0;
 };
 
-// Actual virtual address in the running process
+/// Virtual address in the debuggee process's address space.
+///
+/// Represents runtime addresses where code/data actually lives in the
+/// running process. Used for ptrace operations, breakpoints, watchpoints, etc.
+/// Not tied to any specific ELF - a process may have multiple loaded ELFs.
+/// To convert to file_addr, the target ELF must be specified.
+///
+/// @see file_addr for static addresses from ELF files.
 class virt_addr {
    public:
     explicit virt_addr(std::uint64_t addr) : addr_(addr) {}
