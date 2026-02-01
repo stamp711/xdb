@@ -1,4 +1,4 @@
-// Notes link: https://publish.obsidian.md/stamp711/01+Atomic/eh_frame
+// Notes link: https://publish.obsidian.md/stamp711/01+Atomic/Exception+Frames
 
 #pragma once
 
@@ -14,6 +14,17 @@ class dwarf;
 
 class call_frame_information {
    public:
+    struct eh_hdr {
+        const std::byte* start;
+        const std::byte* search_table;
+        size_t count;
+        uint8_t encoding;
+        call_frame_information* parent;
+
+        /// Returns the pointer to the FDE that contains the given file_address.
+        auto operator[](file_addr fa) const -> const std::byte*;
+    };
+
     struct common_information_entry {
         uint32_t length;
         uint64_t code_alignment_factor;
@@ -33,8 +44,8 @@ class call_frame_information {
 
     call_frame_information() = delete;
     ~call_frame_information() = default;
-    call_frame_information(call_frame_information&&) = default;
-    auto operator=(call_frame_information&&) -> call_frame_information& = default;
+    call_frame_information(call_frame_information&&) = delete;  // eh_hdr contains back pointer
+    auto operator=(call_frame_information&&) -> call_frame_information& = delete;
     call_frame_information(const call_frame_information&) = delete;
     auto operator=(const call_frame_information&) -> call_frame_information& = delete;
 

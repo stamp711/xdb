@@ -1,11 +1,13 @@
 #include <libxdb/detail/dwarf.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <libxdb/dwarf/cursor.hpp>
 #include <libxdb/dwarf/eh.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
+#include <ranges>
 
 namespace {
 
@@ -29,6 +31,31 @@ auto parse_eh_frame_pointer_with_base(xdb::cursor& cur, uint8_t encoding, uint64
             return (uint64_t)((int64_t)base + cur.get_i32());
         case DW_EH_PE_sdata8:
             return (uint64_t)((int64_t)base + cur.get_i64());
+        default:
+            xdb::error::send("Unknown EH pointer encoding");
+    }
+}
+
+auto eh_frame_pointer_encoding_size(uint8_t encoding) -> size_t {
+    switch (encoding & 0x0F) {
+        case DW_EH_PE_absptr:
+            return 8;
+        case DW_EH_PE_uleb128:
+            xdb::error::send("Unexpected variable-length encoding uleb128");
+        case DW_EH_PE_udata2:
+            return 2;
+        case DW_EH_PE_udata4:
+            return 4;
+        case DW_EH_PE_udata8:
+            return 8;
+        case DW_EH_PE_sleb128:
+            xdb::error::send("Unexpected variable-length encoding sleb128");
+        case DW_EH_PE_sdata2:
+            return 2;
+        case DW_EH_PE_sdata4:
+            return 4;
+        case DW_EH_PE_sdata8:
+            return 8;
         default:
             xdb::error::send("Unknown EH pointer encoding");
     }
@@ -59,6 +86,30 @@ auto parse_eh_frame_pointer([[maybe_unused]] const xdb::elf& elf, xdb::cursor& c
     }
 
     return parse_eh_frame_pointer_with_base(cur, encoding, base);
+}
+
+auto parse_eh_hdr(xdb::dwarf& dwarf) -> xdb::call_frame_information::eh_hdr {
+    const auto& elf = dwarf.elf_file();
+    // auto eh_hdr_start = elf.get_section_start_file_addr(".eh_frame_hdr").value();
+    // auto text_section_start = elf.get_section_start_file_addr(".text").value();
+    auto eh_hdr_span = elf.get_section_contents(".eh_frame_hdr");
+    if (eh_hdr_span.empty()) xdb::error::send(".eh_frame_hdr section not found");
+    auto cur = xdb::cursor(eh_hdr_span);
+
+    const auto* start = cur.data();
+    auto version = cur.get_u8();
+    if (version != 1) xdb::error::send("Unsupported EH frame header version");
+    auto eh_frame_ptr_enc = cur.get_u8();
+    auto fde_count_enc = cur.get_u8();
+    auto table_enc = cur.get_u8();
+
+    [[maybe_unused]] auto eh_frame_ptr = parse_eh_frame_pointer_with_base(cur, eh_frame_ptr_enc, 0);
+
+    auto fde_count = parse_eh_frame_pointer_with_base(cur, fde_count_enc, 0);
+
+    const auto* search_table = cur.data();
+
+    return {.start = start, .search_table = search_table, .count = fde_count, .encoding = table_enc, .parent = nullptr};
 }
 
 /// Parse CIE from cursor
@@ -174,6 +225,38 @@ auto parse_fde(const xdb::call_frame_information& cfi, xdb::cursor cur)
 }  // namespace
 
 namespace xdb {
+
+auto call_frame_information::eh_hdr::operator[](file_addr fa) const -> const std::byte* {
+    const auto* elf = fa.elf_file();
+    auto text_section_start = elf->get_section_start_file_addr(".text").value();
+    auto encoding_size = eh_frame_pointer_encoding_size(this->encoding);
+    auto entry_size = encoding_size * 2;  // Each entry consists of {initial_location, address}
+
+    auto decode_entry_initial_location = [this, entry_size, elf, text_section_start](size_t idx) -> uint64_t {
+        auto cur = cursor({this->search_table + (idx * entry_size), search_table + (count * entry_size)});
+        auto current_offset = elf->data_pointer_as_file_offset(cur.data());
+        auto eh_hdr_offset = elf->data_pointer_as_file_offset(this->start);
+
+        return parse_eh_frame_pointer(*elf, cur, this->encoding, current_offset.offset(), text_section_start.addr(),
+                                      eh_hdr_offset.offset(), 0);
+    };
+
+    auto indices = std::ranges::iota_view(std::size_t{0}, this->count);
+    auto f = std::ranges::upper_bound(indices, fa.addr(), [&](uint64_t addr, size_t idx) -> bool {
+        return addr < decode_entry_initial_location(idx);
+    });
+    if (f == indices.begin()) xdb::error::send("Address not found in eh_hdr");
+    auto idx = *(f - 1);
+
+    auto cur =
+        cursor({search_table + (idx * entry_size) + encoding_size, search_table + (idx * entry_size) + entry_size});
+    auto current_offset = elf->data_pointer_as_file_offset(cur.data());
+    auto eh_hdr_offset = elf->data_pointer_as_file_offset(this->start);
+    auto fde_offset_val = parse_eh_frame_pointer(*elf, cur, this->encoding, current_offset.offset(),
+                                                 text_section_start.addr(), eh_hdr_offset.offset(), 0);
+    auto fde_offset = xdb::file_offset(*elf, fde_offset_val);
+    return fde_offset.as_data_pointer();
+}
 
 auto call_frame_information::get_cie(file_offset foff) const -> const common_information_entry& {
     auto offset = foff.offset();
