@@ -91,6 +91,7 @@ namespace xdb {
 dwarf::dwarf(const elf& parent_elf) : elf_(&parent_elf) {
     debug_info_span_ = elf_->get_section_contents(".debug_info");
     compile_units_ = parse_compile_units(*this, debug_info_span_);
+    cfi_ = parse_call_frame_information(*this);
 }
 
 auto dwarf::get_abbrev_table(std::size_t byte_offset) -> const std::unordered_map<std::uint64_t, abbrev>& {

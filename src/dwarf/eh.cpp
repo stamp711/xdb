@@ -88,7 +88,7 @@ auto parse_eh_frame_pointer([[maybe_unused]] const xdb::elf& elf, xdb::cursor& c
     return parse_eh_frame_pointer_with_base(cur, encoding, base);
 }
 
-auto parse_eh_hdr(xdb::dwarf& dwarf) -> xdb::call_frame_information::eh_hdr {
+auto parse_eh_hdr(const xdb::dwarf& dwarf) -> xdb::call_frame_information::eh_hdr {
     const auto& elf = dwarf.elf_file();
     // auto eh_hdr_start = elf.get_section_start_file_addr(".eh_frame_hdr").value();
     // auto text_section_start = elf.get_section_start_file_addr(".text").value();
@@ -225,6 +225,11 @@ auto parse_fde(const xdb::call_frame_information& cfi, xdb::cursor cur)
 }  // namespace
 
 namespace xdb {
+
+auto parse_call_frame_information(const xdb::dwarf& dwarf) -> std::unique_ptr<xdb::call_frame_information> {
+    auto eh_hdr = parse_eh_hdr(dwarf);
+    return std::make_unique<xdb::call_frame_information>(dwarf, eh_hdr);
+}
 
 auto call_frame_information::eh_hdr::operator[](file_addr fa) const -> const std::byte* {
     const auto* elf = fa.elf_file();

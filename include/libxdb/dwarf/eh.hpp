@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <libxdb/types.hpp>
+#include <memory>
 #include <span>
 #include <unordered_map>
 
@@ -42,6 +43,8 @@ class call_frame_information {
         std::span<const std::byte> instructions;
     };
 
+    call_frame_information(const dwarf& dwarf, eh_hdr hdr) : dwarf_(&dwarf), eh_hdr_(hdr) { eh_hdr_.parent = this; }
+
     call_frame_information() = delete;
     ~call_frame_information() = default;
     call_frame_information(call_frame_information&&) = delete;  // eh_hdr contains back pointer
@@ -55,7 +58,10 @@ class call_frame_information {
 
    private:
     const dwarf* dwarf_;
+    eh_hdr eh_hdr_;
     mutable std::unordered_map<uint64_t, common_information_entry> cie_map_;  // offset => cie entry cache
 };
+
+auto parse_call_frame_information(const xdb::dwarf& dwarf) -> std::unique_ptr<xdb::call_frame_information>;
 
 }  // namespace xdb

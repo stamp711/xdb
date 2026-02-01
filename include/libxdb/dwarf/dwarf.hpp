@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/die.hpp>
+#include <libxdb/dwarf/eh.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/dwarf/types.hpp>
 #include <memory>
@@ -28,6 +29,7 @@ class dwarf {
     auto debug_info() const -> std::span<const std::byte> { return debug_info_span_; }
     auto get_abbrev_table(std::size_t byte_offset) -> const std::unordered_map<std::uint64_t, abbrev>&;
     auto compile_units() const -> const std::vector<std::unique_ptr<compile_unit>>& { return compile_units_; }
+    auto cfi() const -> const call_frame_information& { return *cfi_; }
 
     auto compile_unit_containing_address(file_addr address) const -> const compile_unit*;
     auto function_containing_address(file_addr address) const -> std::optional<die>;  // Be aware of lifetimes!
@@ -53,6 +55,7 @@ class dwarf {
     std::unordered_map<std::size_t, std::unique_ptr<const std::unordered_map<std::uint64_t, abbrev>>>
         abbrev_table_cache_;
     std::vector<std::unique_ptr<compile_unit>> compile_units_;
+    std::unique_ptr<call_frame_information> cfi_;
 
     mutable std::unordered_multimap<std::string, const die> function_index_;
 
