@@ -1,9 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <libxdb/dwarf/cfi.hpp>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/die.hpp>
-#include <libxdb/dwarf/eh.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/dwarf/types.hpp>
 #include <memory>

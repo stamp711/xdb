@@ -2,8 +2,8 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <libxdb/dwarf/cfi.hpp>
 #include <libxdb/dwarf/cursor.hpp>
-#include <libxdb/dwarf/eh.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
@@ -222,6 +222,10 @@ auto parse_fde(const xdb::call_frame_information& cfi, xdb::cursor cur)
             .instructions = instructions};
 }
 
+}  // namespace
+
+namespace {
+struct undefined_rule {};
 }  // namespace
 
 namespace xdb {
