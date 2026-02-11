@@ -226,6 +226,20 @@ auto parse_fde(const xdb::call_frame_information& cfi, xdb::cursor cur)
 
 namespace {
 struct undefined_rule {};
+struct same_rule {};
+struct offset_rule {
+    int64_t offset;
+};
+struct val_offset_rule {
+    int64_t offset;
+};
+struct register_rule {
+    uint32_t reg;
+};
+struct cfa_register_rule {
+    uint32_t reg;
+    int64_t offset;
+};
 }  // namespace
 
 namespace xdb {
