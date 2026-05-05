@@ -223,4 +223,14 @@ auto compile_unit::root() const -> die {
     return detail::parse_die(*this, cur);
 }
 
+auto compile_unit::addr_base() const -> std::uint32_t {
+    if (!addr_base_) addr_base_ = root()[DW_AT_addr_base].as_section_offset();
+    return *addr_base_;
+}
+
+auto compile_unit::str_offsets_base() const -> std::uint32_t {
+    if (!str_offsets_base_) str_offsets_base_ = root()[DW_AT_str_offsets_base].as_section_offset();
+    return *str_offsets_base_;
+}
+
 }  // namespace xdb

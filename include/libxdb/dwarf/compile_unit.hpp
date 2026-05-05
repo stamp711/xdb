@@ -4,6 +4,7 @@
 #include <libxdb/dwarf/die.hpp>
 #include <libxdb/dwarf/types.hpp>
 #include <memory>
+#include <optional>
 #include <span>
 #include <unordered_map>
 
@@ -24,11 +25,19 @@ class compile_unit {
 
     auto root() const -> die;
 
+    /// DW_AT_addr_base
+    auto addr_base() const -> std::uint32_t;
+    /// DW_AT_str_offsets_base
+    auto str_offsets_base() const -> std::uint32_t;
+
    private:
     dwarf* parent;
     std::span<const std::byte> span_;
     std::size_t abbrev_offset_;
     std::unique_ptr<class line_table> line_table_;
+
+    mutable std::optional<std::uint32_t> addr_base_;
+    mutable std::optional<std::uint32_t> str_offsets_base_;
 };
 
 }  // namespace xdb
