@@ -216,9 +216,31 @@ auto attr::as_address() const -> file_addr {
 
     const auto& elf = this->cu_->dwarf_info().elf_file();
 
+    auto resolve_addrx = [&](std::size_t index) -> uint64_t {
+        constexpr std::size_t ADDR_ENTRY_SIZE = 8;  // x86_64
+        auto addr_base = cu_->root()[DW_AT_addr_base].as_section_offset();
+
+        cursor addrx_cur(elf.get_section_contents(".debug_addr"));
+        addrx_cur += addr_base + (index * ADDR_ENTRY_SIZE);
+        return addrx_cur.get_u64();
+    };
+
     switch (form_) {
         case DW_FORM_addr:
             return {elf, cur.get_u64()};
+
+        // New in DWARF5, P.213
+        case DW_FORM_addrx:
+            return {elf, resolve_addrx(cur.get_uleb128())};
+        case DW_FORM_addrx1:
+            return {elf, resolve_addrx(cur.get_u8())};
+        case DW_FORM_addrx2:
+            return {elf, resolve_addrx(cur.get_u16())};
+        case DW_FORM_addrx3:
+            return {elf, resolve_addrx(cur.get_u24())};
+        case DW_FORM_addrx4:
+            return {elf, resolve_addrx(cur.get_u32())};
+
         default:
             error::send(std::format("Invalid address form: {:#x}", form_));
     }
