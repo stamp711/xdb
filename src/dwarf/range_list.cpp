@@ -6,6 +6,9 @@
 #include <libxdb/dwarf/dwarf.hpp>
 #include <libxdb/dwarf/range_list.hpp>
 #include <libxdb/error.hpp>
+#include <libxdb/types.hpp>
+
+#include "parse.hpp"
 
 namespace xdb {
 
@@ -41,22 +44,27 @@ auto range_list::iterator::operator++() -> range_list::iterator& {
 
             case DW_RLE_base_addressx: {
                 // ULEB128 index into .debug_addr
-                error::send("DW_RLE_base_addressx unimplemented");  // TODO
+                base_address_ = file_addr(elf, detail::resolve_addrx(*cu_, cur.get_uleb128()));
+                pos_ = cur.data();
                 yield = false;
                 break;
             }
 
             case DW_RLE_startx_endx: {
                 // 2 ULEB128 indexes into .debug_addr
-                xdb::error::send("DW_RLE_startx_endx unimplemented");  // TODO
-                yield = false;
+                current_.low = file_addr(elf, detail::resolve_addrx(*cu_, cur.get_uleb128()));
+                current_.high = file_addr(elf, detail::resolve_addrx(*cu_, cur.get_uleb128()));
+                pos_ = cur.data();
+                yield = true;
                 break;
             }
 
             case DW_RLE_startx_length: {
                 // 2 ULEB operands: 1. index into .debug_addr, 2. length of the range
-                xdb::error::send("DW_RLE_startx_length unimplemented");  // TODO
-                yield = false;
+                current_.low = file_addr(elf, detail::resolve_addrx(*cu_, cur.get_uleb128()));
+                current_.high = current_.low + cur.get_uleb128();
+                pos_ = cur.data();
+                yield = true;
                 break;
             }
 
