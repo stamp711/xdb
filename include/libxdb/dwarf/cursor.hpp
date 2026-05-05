@@ -27,6 +27,11 @@ class cursor {
 
     auto get_u8() -> std::uint8_t { return get_fixed_int<std::uint8_t>(); }
     auto get_u16() -> std::uint16_t { return get_fixed_int<std::uint16_t>(); }
+    auto get_u24() -> std::uint32_t {
+        std::uint32_t lo = get_u16();  // bytes 0-1, little-endian
+        std::uint32_t hi = get_u8();   // byte 2
+        return lo | (hi << 16);
+    }
     auto get_u32() -> std::uint32_t { return get_fixed_int<std::uint32_t>(); }
     auto get_u64() -> std::uint64_t { return get_fixed_int<std::uint64_t>(); }
     auto get_i8() -> std::int8_t { return get_fixed_int<std::int8_t>(); }

@@ -634,7 +634,7 @@ TEST_CASE("DWARF DIE iteration", "[dwarf]") {
     REQUIRE(count > 0);
 }
 
-TEST_CASE("FInd main in multiple cus", "[dwarf]") {
+TEST_CASE("Find main in multiple cus", "[dwarf]") {
     auto path = test_path() / "targets/multi_cu";
     xdb::elf elf(path);
     const auto& cus = elf.get_dwarf().compile_units();

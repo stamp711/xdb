@@ -1,12 +1,14 @@
 #include <libxdb/detail/dwarf.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <libxdb/dwarf/compile_unit.hpp>
 #include <libxdb/dwarf/cursor.hpp>
 #include <libxdb/dwarf/die.hpp>
 #include <libxdb/dwarf/line_table.hpp>
 #include <libxdb/elf.hpp>
 #include <libxdb/error.hpp>
+#include <string_view>
 
 #include "parse.hpp"
 
@@ -213,7 +215,7 @@ auto attr::as_address() const -> file_addr {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     const auto& elf = this->cu_->dwarf_info().elf_file();
-    return file_addr(elf, cur.get_u64());
+    return {elf, cur.get_u64()};
 }
 
 auto attr::as_section_offset() const -> std::uint32_t {
@@ -310,23 +312,44 @@ auto attr::as_reference() const -> die {
 auto xdb::attr::as_string() const -> std::string_view {
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
+
+    auto resolve_strp = [&](std::string_view section_name, std::size_t offset) -> std::string_view {
+        cursor str_cur(cu_->dwarf_info().elf_file().get_section_contents(section_name));
+        str_cur += offset;
+        return str_cur.get_string();
+    };
+
+    auto resolve_strx = [&](std::size_t index) -> std::string_view {
+        constexpr std::size_t STR_OFFSETS_ENTRY_SIZE = 4;  // 32-bit DWARF
+        auto str_offsets_base = cu_->root()[DW_AT_str_offsets_base].as_section_offset();
+
+        cursor soff_cur(cu_->dwarf_info().elf_file().get_section_contents(".debug_str_offsets"));
+        soff_cur += str_offsets_base + (index * STR_OFFSETS_ENTRY_SIZE);
+        return resolve_strp(".debug_str", soff_cur.get_u32());
+    };
+
     switch (form_) {
         case DW_FORM_string:
             return cur.get_string();
-        case DW_FORM_strp: {
-            auto offset = cur.get_u32();
-            auto debug_str_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_str");
-            cursor stab_cur({debug_str_span.begin() + offset, debug_str_span.end()});
-            return stab_cur.get_string();
-        }
-        case DW_FORM_line_strp: {
-            auto offset = cur.get_u32();
-            auto debug_line_span = cu_->dwarf_info().elf_file().get_section_contents(".debug_line_str");
-            cursor stab_cur({debug_line_span.begin() + offset, debug_line_span.end()});
-            return stab_cur.get_string();
-        }
+        case DW_FORM_strp:
+            return resolve_strp(".debug_str", cur.get_u32());
+        case DW_FORM_line_strp:
+            return resolve_strp(".debug_line_str", cur.get_u32());
+
+        // New in DWARF5, P.218
+        case DW_FORM_strx:
+            return resolve_strx(cur.get_uleb128());
+        case DW_FORM_strx1:
+            return resolve_strx(cur.get_u8());
+        case DW_FORM_strx2:
+            return resolve_strx(cur.get_u16());
+        case DW_FORM_strx3:
+            return resolve_strx(cur.get_u24());
+        case DW_FORM_strx4:
+            return resolve_strx(cur.get_u32());
+
         default:
-            error::send("Invalid string form");
+            error::send(std::format("Invalid string form: {:#x}", form_));
     }
 }
 
