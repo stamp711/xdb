@@ -1,3 +1,4 @@
 {
-    "dependencies": ["libedit", "catch2", "fmt", "zydis", "magic-enum"]
+  "builtin-baseline": "ec3ad1c0b013c51116b7eed2ae25bcfc38e639e9",
+  "dependencies": ["libedit", "catch2", "fmt", "zydis", "magic-enum"]
 }
