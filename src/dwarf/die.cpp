@@ -211,15 +211,21 @@ auto die::line() const -> uint64_t {
 // ========== impl attr ==========
 
 auto attr::as_address() const -> file_addr {
-    if (form_ != DW_FORM_addr) error::send("Invalid form");
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
+
     const auto& elf = this->cu_->dwarf_info().elf_file();
-    return {elf, cur.get_u64()};
+
+    switch (form_) {
+        case DW_FORM_addr:
+            return {elf, cur.get_u64()};
+        default:
+            error::send(std::format("Invalid address form: {:#x}", form_));
+    }
 }
 
 auto attr::as_section_offset() const -> std::uint32_t {
-    if (form_ != DW_FORM_sec_offset) error::send("Invalid form");
+    if (form_ != DW_FORM_sec_offset) error::send(std::format("Invalid section offset form: {:#x}", form_));
     // Create a cursor to: [beginning of attr, end of cu)
     cursor cur({location_, cu_->span().end().base()});
     return cur.get_u32();
@@ -240,7 +246,7 @@ auto attr::as_int() const -> std::uint64_t {
         case DW_FORM_udata:
             return cur.get_uleb128();
         default:
-            error::send("Invalid integer form");
+            error::send(std::format("Invalid integer form: {:#x}", form_));
     }
 }
 
@@ -262,7 +268,7 @@ auto attr::as_block() const -> std::span<const std::byte> {
             size = cur.get_uleb128();
             break;
         default:
-            error::send("Invalid block form");
+            error::send(std::format("Invalid block form: {:#x}", form_));
     }
     return {cur.data(), size};
 }
@@ -303,7 +309,7 @@ auto attr::as_reference() const -> die {
             return detail::parse_die(*containing_cu, ref_cursor);
         }
         default:
-            error::send("Invalid reference form");
+            error::send(std::format("Invalid reference form: {:#x}", form_));
     }
     cursor ref_cursor(cu_->span().subspan(offset));
     return detail::parse_die(*cu_, ref_cursor);
@@ -397,7 +403,7 @@ auto xdb::attr::as_range_list() const -> xdb::range_list {
         }
 
         default:
-            error::send("Invalid range list form");
+            error::send(std::format("Invalid range list form: {:#x}", form_));
     }
 
     std::span<const std::byte> data(section.begin() + offset, section.end());
