@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.19)
+cmake_minimum_required(VERSION 3.21)
 
 # Set vcpkg toolchain if VCPKG_ROOT is set and toolchain not already specified
 if(DEFINED ENV{VCPKG_ROOT} AND NOT DEFINED CMAKE_TOOLCHAIN_FILE)
@@ -15,7 +15,7 @@ set(CMAKE_CXX_STANDARD 26)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-add_compile_options(
+set(XDB_CXX_DIAGNOSTIC_FLAGS
     -Wall # Enable most warnings
     -Wextra # Enable even more warnings
     -Wpedantic # Warn about non-standard code
@@ -26,13 +26,16 @@ add_compile_options(
     -Wshadow # Warn if variable shadows another
     # -Werror # Treat all warnings as errors (optional)
 )
+add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:${XDB_CXX_DIAGNOSTIC_FLAGS}>")
 
-project("xdb" VERSION 0.1.0 LANGUAGES CXX ASM)
+project("xdb" VERSION 0.1.0 LANGUAGES CXX C ASM-ATT)
 
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(libedit REQUIRED IMPORTED_TARGET libedit)
 find_package(fmt CONFIG REQUIRED)
 find_package(Zydis CONFIG REQUIRED)
+
+include(CTest)
 
 add_subdirectory(src)
 add_subdirectory(tools)

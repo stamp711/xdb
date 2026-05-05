@@ -105,7 +105,7 @@ struct file_offset {
     explicit file_offset(std::uint64_t val) : value(val) {}
 };
 
-xdb::virt_addr get_load_address(pid_t pid, file_offset offset_in_file) {
+auto get_load_address(pid_t pid, file_offset offset_in_file) -> xdb::virt_addr {
     std::ifstream maps("/proc/" + std::to_string(pid) + "/maps");
 
     // 555555555000-555555556000 r-xp 00001000 08:02 5280459
@@ -134,13 +134,13 @@ xdb::virt_addr get_load_address(pid_t pid, file_offset offset_in_file) {
 }  // namespace
 
 TEST_CASE("process::launch success", "[process]") {
-    auto proc = xdb::process::launch("/bin/sleep");
+    auto proc = xdb::process::launch(test_path() / "targets/run_endlessly");
     REQUIRE(get_process_status(proc->pid()) == 't');
     REQUIRE(kill_process(proc->pid()));
 }
 
 TEST_CASE("process::launch failure", "[process]") {
-    REQUIRE_THROWS_AS(xdb::process::launch(test_path() / "/bin/doesnotexist"), xdb::error);
+    REQUIRE_THROWS_AS(xdb::process::launch(test_path() / "targets/doesnotexist"), xdb::error);
 }
 
 TEST_CASE("process::attach success", "[process]") {
@@ -672,12 +672,11 @@ TEST_CASE("Line table", "[dwarf]") {
 
     REQUIRE(it->file_entry->path.filename() == "hello.cpp");
 
-    REQUIRE(it->line == 3);      // auto main() -> int {
-    REQUIRE((++it)->line == 4);  //     std::cout << "hello";
-    REQUIRE((++it)->line == 5);  //     return 0;
-    REQUIRE((++it)->line == 6);  // }
-    REQUIRE((++it)->end_sequence);
-    REQUIRE(++it == line_table.end());
+    std::vector<uint64_t> stmt_lines;
+    for (; it != line_table.end(); ++it) {
+        if (it->is_stmt) stmt_lines.push_back(it->line);
+    }
+    REQUIRE(stmt_lines == std::vector<uint64_t>{3, 4, 5});
 }
 
 TEST_CASE("Source-level breakpoints", "[breakpoint]") {

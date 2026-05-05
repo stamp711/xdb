@@ -13,7 +13,7 @@ enum class register_id : std::uint8_t {
 // Using X-macro pattern for register definition - legitimate macro use case
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define DEFINE_REGISTER(name, dwarf_id, size, offset, type, format) name
-#include <libxdb/detail/registers.inc>
+#include <libxdb/detail/registers.def.hpp>
 #undef DEFINE_REGISTER
 };
 
@@ -42,7 +42,7 @@ inline constexpr register_info g_register_infos[] = {
 // NOLINTNEXTLINE(cppcoreguidelines-macro-usage)
 #define DEFINE_REGISTER(name, dwarf_id, size, offset, type, format) \
     {register_id::name, #name, dwarf_id, size, offset, type, format}
-#include <libxdb/detail/registers.inc>
+#include <libxdb/detail/registers.def.hpp>
 #undef DEFINE_REGISTER
 };
 

@@ -7,7 +7,7 @@ namespace {
 
 const std::unordered_map<std::string_view, std::uint64_t> g_syscall_name_map = {
 #define DEFINE_SYSCALL(name, id) {#name, id},
-#include "include/syscalls.inc"
+#include "include/syscalls.def.hpp"
 #undef DEFINE_SYSCALL
 };
 
@@ -20,7 +20,7 @@ auto syscall_id_to_name(std::uint64_t id) -> std::string_view {
 #define DEFINE_SYSCALL(name, id) \
     case id:                     \
         return #name;
-#include "include/syscalls.inc"
+#include "include/syscalls.def.hpp"
 #undef DEFINE_SYSCALL
         default:
             error::send("Unknown syscall id");

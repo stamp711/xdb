@@ -1,5 +1,7 @@
 .intel_syntax noprefix
 
+.section .note.GNU-stack,"",@progbits
+
 .global main
 
 .section .rodata

@@ -1,4 +1,4 @@
-file(GLOB_RECURSE SRC_FILES "*.cpp")
+file(GLOB_RECURSE SRC_FILES CONFIGURE_DEPENDS "*.cpp")
 add_library(libxdb ${SRC_FILES})
 add_library(xdb::libxdb ALIAS libxdb)
 
@@ -9,9 +9,7 @@ set_target_properties(
             xdb # avoid liblibxdb.a name
 )
 
-target_compile_features(libxdb PUBLIC cxx_std_20)
-
-target_compile_options(libxdb PRIVATE -g -Wall -Wextra)
+target_compile_features(libxdb PUBLIC cxx_std_26)
 
 target_link_libraries(libxdb PRIVATE Zydis::Zydis)
 

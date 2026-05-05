@@ -9,6 +9,7 @@ function(add_test_asm_target target_name source_file)
     add_executable(${target_name} ${source_file})
     target_compile_options(${target_name} PRIVATE -g)
     target_link_options(${target_name} PRIVATE -pie)
+    set_target_properties(${target_name} PROPERTIES LINKER_LANGUAGE C)
     add_dependencies(tests ${target_name})
 endfunction()
 
