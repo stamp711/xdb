@@ -10,7 +10,7 @@
 
 namespace {
 
-void handle_memory_read(xdb::process &process, std::span<const std::string> args) {
+void handle_memory_read(xdb::process& process, std::span<const std::string> args) {
     constexpr std::size_t default_read_bytes = 32;
     constexpr std::size_t bytes_per_line = 16;
 
@@ -50,12 +50,12 @@ void handle_memory_read(xdb::process &process, std::span<const std::string> args
 
             fmt::println("");
         }
-    } catch (const xdb::error &e) {
+    } catch (const xdb::error& e) {
         std::cerr << "Error reading memory: " << e.what() << '\n';
     }
 }
 
-void handle_memory_write(xdb::process &process, std::span<const std::string> args) {
+void handle_memory_write(xdb::process& process, std::span<const std::string> args) {
     if (args.size() < 4) {
         xdb_handlers::print_help_init({"help", "memory"});
         return;
@@ -88,7 +88,7 @@ void handle_memory_write(xdb::process &process, std::span<const std::string> arg
         }
         fmt::println("]");
 
-    } catch (const xdb::error &e) {
+    } catch (const xdb::error& e) {
         std::cerr << "Error writing memory: " << e.what() << '\n';
     }
 }
@@ -97,7 +97,7 @@ void handle_memory_write(xdb::process &process, std::span<const std::string> arg
 
 namespace xdb_handlers {
 
-void handle_memory_command(xdb::process &process, std::span<const std::string> args) {
+void handle_memory_command(xdb::process& process, std::span<const std::string> args) {
     if (args.size() < 2) {
         print_help_init({"help", "memory"});
         return;

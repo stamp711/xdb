@@ -9,15 +9,15 @@
 
 namespace xdb_handlers {
 
-void print_disassembly(xdb::process &process, xdb::virt_addr address, std::size_t n_instructions) {
+void print_disassembly(xdb::process& process, xdb::virt_addr address, std::size_t n_instructions) {
     xdb::disassembler dis(process);
     auto instructions = dis.disassemble(n_instructions, address);
-    for (const auto &instruction : instructions) {
+    for (const auto& instruction : instructions) {
         fmt::println("{:08x}: {}", instruction.address.addr(), instruction.text);
     }
 }
 
-void handle_disassemble_command(xdb::process &process, std::span<const std::string> args) {
+void handle_disassemble_command(xdb::process& process, std::span<const std::string> args) {
     auto address = process.get_pc();
     constexpr std::size_t default_instruction_count = 5;
     std::size_t n_instructions = default_instruction_count;
