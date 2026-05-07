@@ -222,24 +222,37 @@ auto parse_fde(const xdb::call_frame_information& cfi, xdb::cursor cur)
             .instructions = instructions};
 }
 
-}  // namespace
+namespace cfa_rule {
+/// The CFA is calculated by register R's value + offset N
+struct register_and_offset {
+    uint32_t reg;
+    int64_t offset;
+};
+}  // namespace cfa_rule
 
-namespace {
-struct undefined_rule {};
-struct same_rule {};
-struct offset_rule {
-    int64_t offset;
-};
-struct val_offset_rule {
-    int64_t offset;
-};
-struct register_rule {
+namespace register_rule {
+/// Not possible to restore
+struct undefined {};
+
+/// Stored in another register
+struct register_r {
     uint32_t reg;
 };
-struct cfa_register_rule {
-    uint32_t reg;
+
+/// Same register
+struct same_value {};
+
+/// Stored in offset N from current CFA
+struct offset {
     int64_t offset;
 };
+
+/// Value is CFA + N
+struct val_offset {
+    int64_t offset;
+};
+}  // namespace register_rule
+
 }  // namespace
 
 namespace xdb {
