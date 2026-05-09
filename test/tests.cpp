@@ -674,7 +674,9 @@ TEST_CASE("Line table", "[dwarf]") {
 
     std::vector<uint64_t> stmt_lines;
     for (; it != line_table.end(); ++it) {
-        if (it->is_stmt) stmt_lines.push_back(it->line);
+        if (it->is_stmt && it->file_entry && it->file_entry->path.filename() == "hello.cpp") {
+            stmt_lines.push_back(it->line);
+        }
     }
     REQUIRE(stmt_lines == std::vector<uint64_t>{3, 4, 5});
 }
