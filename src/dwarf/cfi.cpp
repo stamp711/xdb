@@ -8,6 +8,10 @@
 #include <libxdb/error.hpp>
 #include <libxdb/types.hpp>
 #include <ranges>
+#include <unordered_map>
+#include <utility>
+#include <variant>
+#include <vector>
 
 namespace {
 
@@ -228,6 +232,8 @@ struct register_and_offset {
     uint32_t reg;
     int64_t offset;
 };
+
+using rule = std::variant<register_and_offset>;
 }  // namespace cfa_rule
 
 namespace register_rule {
@@ -251,7 +257,20 @@ struct offset {
 struct val_offset {
     int64_t offset;
 };
+
+using rule = std::variant<undefined, register_r, same_value, offset, val_offset>;
 }  // namespace register_rule
+
+struct unwind_context {
+    xdb::cursor cur;
+    xdb::file_addr location;
+    cfa_rule::register_and_offset cfa_rule;
+
+    using register_ruleset = std::unordered_map<uint32_t, register_rule::rule>;
+    register_ruleset cir_register_rules;
+    register_ruleset register_rules;
+    std::vector<std::pair<register_ruleset, cfa_rule::rule>> rule_stack;
+};
 
 }  // namespace
 
