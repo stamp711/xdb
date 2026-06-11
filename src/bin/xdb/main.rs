@@ -1,12 +1,13 @@
 mod commands;
 
-use std::path::Path;
+use std::io::{BufRead, BufReader};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use nix::sys::signal::{SigHandler, Signal};
 use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
-use xdb::{Error, Pid, Process, ProcessState, StopReason};
+use xdb::{Error, Pid, ProcessState, StopReason, Target};
 
 static INFERIOR_PID: AtomicI32 = AtomicI32::new(0);
 
@@ -25,13 +26,13 @@ fn main() {
     }
 }
 
-fn attach(args: &[String]) -> xdb::Result<Process> {
+fn attach(args: &[String]) -> xdb::Result<Target> {
     match args {
         [_, flag, pid] if flag.as_str() == "-p" => {
             let pid: i32 = pid.parse().map_err(|_| Error::new("Invalid PID"))?;
-            Process::attach(Pid::from_raw(pid))
+            Target::attach(Pid::from_raw(pid))
         }
-        [_, program] => Process::launch(Path::new(program), true, None),
+        [_, program] => Target::launch(Path::new(program), None),
         _ => {
             eprintln!("Usage: xdb <program> | xdb -p <pid>");
             std::process::exit(1);
@@ -41,14 +42,14 @@ fn attach(args: &[String]) -> xdb::Result<Process> {
 
 fn run() -> xdb::Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    let mut process = attach(&args)?;
+    let mut target = attach(&args)?;
 
-    INFERIOR_PID.store(process.pid().as_raw(), Ordering::Relaxed);
+    INFERIOR_PID.store(target.process().pid().as_raw(), Ordering::Relaxed);
     // SAFETY: the handler only calls async-signal-safe functions.
     unsafe { nix::sys::signal::signal(Signal::SIGINT, SigHandler::Handler(handle_sigint)) }
         .map_err(|e| Error::new(format!("Failed to install SIGINT handler: {e}")))?;
 
-    println!("Attached to process with PID: {}", process.pid());
+    println!("Attached to process with PID: {}", target.process().pid());
 
     let mut editor = DefaultEditor::new().map_err(|e| Error::new(e.to_string()))?;
     let mut last_line = String::new();
@@ -76,7 +77,7 @@ fn run() -> xdb::Result<()> {
             break;
         }
 
-        if let Err(e) = handle_command(&mut process, command) {
+        if let Err(e) = handle_command(&mut target, command) {
             eprintln!("{e}");
         }
     }
@@ -84,28 +85,27 @@ fn run() -> xdb::Result<()> {
     Ok(())
 }
 
-fn handle_command(process: &mut Process, line: &str) -> xdb::Result<()> {
+fn handle_command(target: &mut Target, line: &str) -> xdb::Result<()> {
     let args: Vec<&str> = line.split_whitespace().collect();
     let command = args[0];
 
     match command {
         "continue" | "c" => {
-            process.resume()?;
-            let reason = process.wait_on_signal()?;
-            print_stop_reason(process, reason);
+            target.resume()?;
+            let reason = target.wait_on_signal()?;
+            handle_stop(target, reason);
             Ok(())
         }
-        "register" | "reg" => commands::register::handle(process, &args),
-        "breakpoint" | "b" => commands::breakpoint::handle(process, &args),
-        "memory" | "mem" => commands::memory::handle(process, &args),
-        "disassemble" | "disas" => commands::disassemble::handle(process, &args),
-        "watchpoint" | "w" => commands::watchpoint::handle(process, &args),
-        "catchpoint" | "catch" => commands::catchpoint::handle(process, &args),
-        "stepi" | "si" => {
-            let reason = process.step_instruction()?;
-            print_stop_reason(process, reason);
-            Ok(())
-        }
+        "stepi" | "si" => step(target, Target::step_instruction),
+        "step" | "s" => step(target, Target::step_in),
+        "next" | "n" => step(target, Target::step_over),
+        "finish" => step(target, Target::step_out),
+        "breakpoint" | "b" => commands::breakpoint::handle(target, &args),
+        "register" | "reg" => commands::register::handle(target.process_mut(), &args),
+        "memory" | "mem" => commands::memory::handle(target.process_mut(), &args),
+        "disassemble" | "disas" => commands::disassemble::handle(target.process_mut(), &args),
+        "watchpoint" | "w" => commands::watchpoint::handle(target.process_mut(), &args),
+        "catchpoint" | "catch" => commands::catchpoint::handle(target.process_mut(), &args),
         "help" | "h" => {
             commands::print_help(&args);
             Ok(())
@@ -114,14 +114,25 @@ fn handle_command(process: &mut Process, line: &str) -> xdb::Result<()> {
     }
 }
 
-fn print_stop_reason(process: &Process, reason: StopReason) {
-    let pid = process.pid();
+fn step(target: &mut Target, op: fn(&mut Target) -> xdb::Result<StopReason>) -> xdb::Result<()> {
+    let reason = op(target)?;
+    handle_stop(target, reason);
+    Ok(())
+}
+
+fn handle_stop(target: &Target, reason: StopReason) {
+    let pid = target.process().pid();
     match reason.state {
         ProcessState::Stopped => {
             println!(
                 "Process {pid} stopped with signal {}",
                 signal_name(reason.info)
             );
+            if let Some(entry) = target.line_entry_at_pc()
+                && let Some(file) = target.source_file_at_pc()
+            {
+                print_source(&file, entry.line, 3);
+            }
         }
         ProcessState::Exited => println!("Process {pid} exited with status {}", reason.info),
         ProcessState::Terminated => {
@@ -131,6 +142,29 @@ fn print_stop_reason(process: &Process, reason: StopReason) {
             );
         }
         ProcessState::Running => {}
+    }
+}
+
+fn print_source(path: &PathBuf, line: u64, context: u64) {
+    let Ok(file) = std::fs::File::open(path) else {
+        return;
+    };
+    let start = line.saturating_sub(context).max(1);
+    let end = line + context;
+    for (number, text) in BufReader::new(file)
+        .lines()
+        .enumerate()
+        .map(|(i, l)| (i as u64 + 1, l))
+    {
+        if number < start {
+            continue;
+        }
+        if number > end {
+            break;
+        }
+        let Ok(text) = text else { break };
+        let marker = if number == line { '>' } else { ' ' };
+        println!("{marker} {number:>4} {text}");
     }
 }
 

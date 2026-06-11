@@ -67,6 +67,17 @@ pub struct StopReason {
 }
 
 impl StopReason {
+    /// A synthetic single-step stop, used when stepping is simulated without
+    /// actually resuming the inferior (e.g. stepping through inlined frames).
+    pub fn single_step() -> Self {
+        Self {
+            state: ProcessState::Stopped,
+            info: SIGTRAP,
+            trap: Some(TrapType::SingleStep),
+            syscall: None,
+        }
+    }
+
     pub fn is_step(&self) -> bool {
         self.state == ProcessState::Stopped
             && self.info == SIGTRAP
@@ -310,6 +321,29 @@ impl Process {
         let reason = self.wait_on_signal()?;
         if let Some(id) = to_reenable {
             self.enable_breakpoint_site(id)?;
+        }
+        Ok(reason)
+    }
+
+    /// Resume until the inferior reaches `address`, using a temporary internal
+    /// breakpoint if there isn't already one there.
+    pub fn run_until_address(&mut self, address: VirtAddr) -> Result<StopReason> {
+        let temporary = if self.breakpoint_sites.contains_address(address) {
+            None
+        } else {
+            let id = self.create_breakpoint_site(address, false, true)?;
+            self.enable_breakpoint_site(id)?;
+            Some(id)
+        };
+
+        self.resume()?;
+        let mut reason = self.wait_on_signal()?;
+        if reason.is_breakpoint() && self.get_pc()? == address {
+            reason.trap = Some(TrapType::SingleStep);
+        }
+
+        if let Some(id) = temporary {
+            self.remove_breakpoint_site_by_id(id)?;
         }
         Ok(reason)
     }

@@ -11,13 +11,14 @@ pub mod pipe;
 pub mod process;
 pub mod register_info;
 pub mod registers;
+pub mod stack;
 pub mod stoppoint;
 pub mod syscalls;
 pub mod target;
 pub mod types;
 pub mod watchpoint;
 
-pub use breakpoint::{BreakpointSite, SiteId};
+pub use breakpoint::{Breakpoint, BreakpointId, BreakpointKind, BreakpointSite, SiteId};
 pub use disassembler::{Disassembler, Instruction};
 pub use dwarf::Dwarf;
 pub use elf::Elf;
@@ -30,6 +31,7 @@ pub use process::{
 };
 pub use register_info::{REGISTER_INFOS, RegisterId, RegisterInfo};
 pub use registers::{RegisterValue, Registers};
+pub use stack::Stack;
 pub use stoppoint::{Stoppoint, StoppointCollection};
 pub use target::Target;
 pub use types::{FileAddr, StoppointMode, VirtAddr};

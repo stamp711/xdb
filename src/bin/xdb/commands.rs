@@ -17,7 +17,7 @@ pub fn print_help(args: &[&str]) {
         Some("breakpoint") => {
             eprintln!("Available breakpoint commands:");
             eprintln!("    list");
-            eprintln!("    set <address>");
+            eprintln!("    set <function> | <file>:<line> | 0x<address>  [-h]");
             eprintln!("    enable <id>");
             eprintln!("    disable <id>");
             eprintln!("    delete <id>");
