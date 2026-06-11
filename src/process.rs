@@ -10,11 +10,16 @@ use nix::sys::signal::{self, Signal};
 use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::{self, ForkResult, Pid};
 
+use crate::breakpoint::{BreakpointSite, SiteId};
 use crate::error::{ErrnoContext, Error, Result};
 use crate::inferior;
 use crate::pipe::Pipe;
 use crate::register_info::{DEBUG_REGISTER_IDS, RegisterId, RegisterInfo, RegisterKind};
 use crate::registers::{self, RegisterValue, Registers, USER_I387_OFFSET, USER_REGS_OFFSET};
+use crate::stoppoint::{Stoppoint, StoppointCollection};
+use crate::types::VirtAddr;
+
+const INT3: u8 = 0xCC;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessState {
@@ -84,6 +89,8 @@ pub struct Process {
     is_attached: bool,
     state: ProcessState,
     registers: Registers,
+    breakpoint_sites: StoppointCollection<BreakpointSite>,
+    next_site_id: SiteId,
 }
 
 impl Process {
@@ -154,6 +161,8 @@ impl Process {
             is_attached: debug,
             state: ProcessState::Stopped,
             registers: Registers::new(),
+            breakpoint_sites: StoppointCollection::default(),
+            next_site_id: 1,
         };
 
         if debug {
@@ -177,6 +186,8 @@ impl Process {
             is_attached: true,
             state: ProcessState::Stopped,
             registers: Registers::new(),
+            breakpoint_sites: StoppointCollection::default(),
+            next_site_id: 1,
         };
         process.wait_on_signal()?;
         set_ptrace_options(pid)?;
@@ -193,9 +204,42 @@ impl Process {
     }
 
     pub fn resume(&mut self) -> Result<()> {
+        // Single step the breakpoint if it was hit
+        let pc = self.get_pc()?;
+        if self.breakpoint_sites.enabled_at_address(pc) {
+            let id = self.breakpoint_sites.get_by_address(pc)?.id();
+            self.disable_breakpoint_site(id)?; // Disable the breakpoint
+            // Single step the process
+            ptrace::step(self.pid, None).context("PTRACE_SINGLESTEP failed")?;
+            // Wait for the process to stop again
+            waitpid(self.pid, None).context("waitpid failed")?;
+            self.enable_breakpoint_site(id)?; // Re-enable the breakpoint
+        }
+
         ptrace::cont(self.pid, None).context("Could not resume process")?;
         self.state = ProcessState::Running;
         Ok(())
+    }
+
+    pub fn step_instruction(&mut self) -> Result<StopReason> {
+        // If we are stopped at a breakpoint, restore it to the original instruction
+        // before stepping
+        let pc = self.get_pc()?;
+        let to_reenable = if self.breakpoint_sites.enabled_at_address(pc) {
+            Some(self.breakpoint_sites.get_by_address(pc)?.id())
+        } else {
+            None
+        };
+
+        if let Some(id) = to_reenable {
+            self.disable_breakpoint_site(id)?;
+        }
+        ptrace::step(self.pid, None).context("PTRACE_SINGLESTEP failed")?;
+        let reason = self.wait_on_signal()?;
+        if let Some(id) = to_reenable {
+            self.enable_breakpoint_site(id)?;
+        }
+        Ok(reason)
     }
 
     pub fn wait_on_signal(&mut self) -> Result<StopReason> {
@@ -205,6 +249,16 @@ impl Process {
 
         if self.is_attached && self.state == ProcessState::Stopped {
             self.read_all_registers()?;
+
+            // If stop caused by a software breakpoint, revert pc to breakpoint address
+            // NOTE: if the breakpoint is not created by xdb, pc will remain to be the next
+            // instruction
+            if reason.info == Signal::SIGTRAP as u8 {
+                let prev_pc = self.get_pc()? - 1;
+                if self.breakpoint_sites.enabled_at_address(prev_pc) {
+                    self.set_pc(prev_pc)?;
+                }
+            }
         }
 
         Ok(reason)
@@ -212,6 +266,85 @@ impl Process {
 
     pub fn registers(&self) -> &Registers {
         &self.registers
+    }
+
+    pub fn get_pc(&self) -> Result<VirtAddr> {
+        Ok(VirtAddr(
+            self.registers.read_by_id_as::<u64>(RegisterId::rip)?,
+        ))
+    }
+
+    pub fn set_pc(&mut self, addr: VirtAddr) -> Result<()> {
+        self.write_register_by_id(RegisterId::rip, RegisterValue::U64(addr.addr()))
+    }
+
+    pub fn breakpoint_sites(&self) -> &StoppointCollection<BreakpointSite> {
+        &self.breakpoint_sites
+    }
+
+    pub fn create_breakpoint_site(
+        &mut self,
+        address: VirtAddr,
+        hardware: bool,
+        internal: bool,
+    ) -> Result<SiteId> {
+        if self.breakpoint_sites.contains_address(address) {
+            return Err(Error::new(format!(
+                "Breakpoint site already created at address {address}"
+            )));
+        }
+        let id = if internal {
+            -1
+        } else {
+            let id = self.next_site_id;
+            self.next_site_id += 1;
+            id
+        };
+        self.breakpoint_sites
+            .push(BreakpointSite::new(id, address, hardware, internal));
+        Ok(id)
+    }
+
+    pub fn enable_breakpoint_site(&mut self, id: SiteId) -> Result<()> {
+        let site = self.breakpoint_sites.get_by_id(id)?;
+        if site.enabled {
+            return Ok(());
+        }
+        if site.hardware {
+            return Err(Error::new("Hardware breakpoints are not yet supported"));
+        }
+        let address = site.address.addr();
+        let original = inferior::replace_byte(self.pid, address, INT3)?;
+        let site = self.breakpoint_sites.get_by_id_mut(id)?;
+        site.original_byte = original;
+        site.enabled = true;
+        Ok(())
+    }
+
+    pub fn disable_breakpoint_site(&mut self, id: SiteId) -> Result<()> {
+        let site = self.breakpoint_sites.get_by_id(id)?;
+        let process_gone = matches!(self.state, ProcessState::Exited | ProcessState::Terminated);
+        if !site.enabled || process_gone {
+            return Ok(());
+        }
+        if site.hardware {
+            return Err(Error::new("Hardware breakpoints are not yet supported"));
+        }
+        let (address, original) = (site.address.addr(), site.original_byte);
+        inferior::replace_byte(self.pid, address, original)?;
+        self.breakpoint_sites.get_by_id_mut(id)?.enabled = false;
+        Ok(())
+    }
+
+    pub fn remove_breakpoint_site_by_id(&mut self, id: SiteId) -> Result<()> {
+        self.disable_breakpoint_site(id)?;
+        self.breakpoint_sites.remove_by_id(id)?;
+        Ok(())
+    }
+
+    pub fn remove_breakpoint_site_by_address(&mut self, address: VirtAddr) -> Result<()> {
+        let id = self.breakpoint_sites.get_by_address(address)?.id();
+        self.remove_breakpoint_site_by_id(id)
     }
 
     /// Refresh the whole register cache from the inferior. The GPRs and FPRs each come in one

@@ -65,3 +65,33 @@ pub(crate) fn write_user_area(pid: Pid, offset: usize, data: u64) -> Result<()> 
     )
     .context("PTRACE_POKEUSER failed")
 }
+
+fn peek_word(pid: Pid, addr: u64) -> Result<u64> {
+    ptrace::read(pid, std::ptr::without_provenance_mut(addr as usize))
+        .map(|word| word as u64)
+        .context("PTRACE_PEEKDATA failed")
+}
+
+fn poke_word(pid: Pid, addr: u64, word: u64) -> Result<()> {
+    ptrace::write(
+        pid,
+        std::ptr::without_provenance_mut(addr as usize),
+        word as libc::c_long,
+    )
+    .context("PTRACE_POKEDATA failed")
+}
+
+/// Overwrite a single byte in the inferior, returning the byte that was there.
+/// Reads and rewrites the containing aligned word so memory protection (e.g.
+/// non-writable code pages) does not block the patch.
+pub(crate) fn replace_byte(pid: Pid, addr: u64, new_byte: u8) -> Result<u8> {
+    let aligned = addr & !0b111;
+    let index = (addr - aligned) as usize;
+
+    let mut bytes = peek_word(pid, aligned)?.to_le_bytes();
+    let original = bytes[index];
+    bytes[index] = new_byte;
+    poke_word(pid, aligned, u64::from_le_bytes(bytes))?;
+
+    Ok(original)
+}

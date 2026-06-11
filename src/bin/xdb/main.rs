@@ -96,6 +96,12 @@ fn handle_command(process: &mut Process, line: &str) -> xdb::Result<()> {
             Ok(())
         }
         "register" | "reg" => commands::register::handle(process, &args),
+        "breakpoint" | "b" => commands::breakpoint::handle(process, &args),
+        "stepi" | "si" => {
+            let reason = process.step_instruction()?;
+            print_stop_reason(process, reason);
+            Ok(())
+        }
         "help" | "h" => {
             commands::print_help(&args);
             Ok(())
