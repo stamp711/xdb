@@ -347,6 +347,34 @@ impl Process {
         self.remove_breakpoint_site_by_id(id)
     }
 
+    pub fn read_memory(&self, address: VirtAddr, size: usize) -> Result<Vec<u8>> {
+        inferior::read_memory(self.pid, address.addr(), size)
+    }
+
+    /// Read inferior memory with any software breakpoint bytes replaced by the
+    /// original instruction bytes, so the caller never sees `0xCC` patches.
+    pub fn read_memory_without_traps(&self, address: VirtAddr, size: usize) -> Result<Vec<u8>> {
+        let mut memory = self.read_memory(address, size)?;
+        let end = address + size as u64;
+        for site in self.breakpoint_sites.get_in_address_range(address, end) {
+            if !site.is_enabled() || site.is_hardware() {
+                continue;
+            }
+            let offset = (site.address().addr() - address.addr()) as usize;
+            memory[offset] = site.original_byte;
+        }
+        Ok(memory)
+    }
+
+    pub fn write_memory(&mut self, address: VirtAddr, data: &[u8]) -> Result<()> {
+        inferior::write_memory(self.pid, address.addr(), data)
+    }
+
+    pub fn read_memory_as<T: crate::bit::Pod>(&self, address: VirtAddr) -> Result<T> {
+        let data = self.read_memory(address, size_of::<T>())?;
+        Ok(crate::bit::from_bytes(&data))
+    }
+
     /// Refresh the whole register cache from the inferior. The GPRs and FPRs each come in one
     /// ptrace call, but the debug registers are only reachable individually via the user area.
     fn read_all_registers(&mut self) -> Result<()> {

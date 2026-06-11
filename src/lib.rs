@@ -1,5 +1,6 @@
 pub mod bit;
 pub mod breakpoint;
+pub mod disassembler;
 pub mod error;
 mod inferior;
 pub mod parse;
@@ -11,6 +12,7 @@ pub mod stoppoint;
 pub mod types;
 
 pub use breakpoint::{BreakpointSite, SiteId};
+pub use disassembler::{Disassembler, Instruction};
 pub use error::{Error, Result};
 pub use nix::unistd::Pid;
 pub use pipe::Pipe;

@@ -97,6 +97,8 @@ fn handle_command(process: &mut Process, line: &str) -> xdb::Result<()> {
         }
         "register" | "reg" => commands::register::handle(process, &args),
         "breakpoint" | "b" => commands::breakpoint::handle(process, &args),
+        "memory" | "mem" => commands::memory::handle(process, &args),
+        "disassemble" | "disas" => commands::disassemble::handle(process, &args),
         "stepi" | "si" => {
             let reason = process.step_instruction()?;
             print_stop_reason(process, reason);
