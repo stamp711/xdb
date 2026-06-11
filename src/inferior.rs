@@ -51,6 +51,10 @@ pub(crate) fn write_fprs(pid: Pid, fprs: &libc::user_fpregs_struct) -> Result<()
     Ok(())
 }
 
+pub(crate) fn get_signal_info(pid: Pid) -> Result<libc::siginfo_t> {
+    ptrace::getsiginfo(pid).context("PTRACE_GETSIGINFO failed")
+}
+
 pub(crate) fn read_user_area(pid: Pid, offset: usize) -> Result<u64> {
     ptrace::read_user(pid, std::ptr::without_provenance_mut(offset))
         .map(|word| word as u64)

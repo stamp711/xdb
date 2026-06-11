@@ -38,40 +38,86 @@ pub enum ProcessState {
     Terminated,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TrapType {
+    Unknown,
+    SingleStep,
+    SoftwareBreakpoint,
+    HardwareStoppoint,
+    Syscall,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct SyscallInformation {
+    pub id: u64,
+    pub is_entry: bool,
+    pub args: Option<[u64; 6]>,
+    pub ret: Option<i64>,
+}
+
+const SIGTRAP: u8 = Signal::SIGTRAP as u8;
+const SYSCALL_SIGTRAP: u8 = SIGTRAP | 0x80;
+
 #[derive(Clone, Copy, Debug)]
 pub struct StopReason {
     pub state: ProcessState,
     pub info: u8,
+    pub trap: Option<TrapType>,
+    pub syscall: Option<SyscallInformation>,
+}
+
+impl StopReason {
+    pub fn is_step(&self) -> bool {
+        self.state == ProcessState::Stopped
+            && self.info == SIGTRAP
+            && self.trap == Some(TrapType::SingleStep)
+    }
+
+    pub fn is_breakpoint(&self) -> bool {
+        self.state == ProcessState::Stopped
+            && self.info == SIGTRAP
+            && matches!(
+                self.trap,
+                Some(TrapType::SoftwareBreakpoint | TrapType::HardwareStoppoint)
+            )
+    }
 }
 
 impl From<WaitStatus> for StopReason {
     fn from(status: WaitStatus) -> Self {
-        match status {
-            WaitStatus::Stopped(_, signal) => Self {
-                state: ProcessState::Stopped,
-                info: signal as u8,
-            },
-            WaitStatus::Exited(_, code) => Self {
-                state: ProcessState::Exited,
-                info: code as u8,
-            },
-            WaitStatus::Signaled(_, signal, _) => Self {
-                state: ProcessState::Terminated,
-                info: signal as u8,
-            },
-            WaitStatus::PtraceEvent(_, signal, _) => Self {
-                state: ProcessState::Stopped,
-                info: signal as u8,
-            },
-            WaitStatus::PtraceSyscall(_) => Self {
-                state: ProcessState::Stopped,
-                info: Signal::SIGTRAP as u8 | 0x80,
-            },
-            _ => Self {
-                state: ProcessState::Stopped,
-                info: 0,
-            },
+        let (state, info) = match status {
+            WaitStatus::Stopped(_, signal) => (ProcessState::Stopped, signal as u8),
+            WaitStatus::Exited(_, code) => (ProcessState::Exited, code as u8),
+            WaitStatus::Signaled(_, signal, _) => (ProcessState::Terminated, signal as u8),
+            WaitStatus::PtraceEvent(_, signal, _) => (ProcessState::Stopped, signal as u8),
+            WaitStatus::PtraceSyscall(_) => (ProcessState::Stopped, SYSCALL_SIGTRAP),
+            _ => (ProcessState::Stopped, 0),
+        };
+        Self {
+            state,
+            info,
+            trap: None,
+            syscall: None,
         }
+    }
+}
+
+/// Which syscalls a syscall catchpoint should stop on.
+#[derive(Clone, Debug, Default)]
+pub enum SyscallCatchPolicy {
+    #[default]
+    None,
+    Some(std::collections::HashSet<u64>),
+    All,
+}
+
+impl SyscallCatchPolicy {
+    fn catches_none(&self) -> bool {
+        matches!(self, Self::None) || matches!(self, Self::Some(ids) if ids.is_empty())
+    }
+
+    fn catches(&self, id: u64) -> bool {
+        matches!(self, Self::All) || matches!(self, Self::Some(ids) if ids.contains(&id))
     }
 }
 
@@ -102,6 +148,8 @@ pub struct Process {
     next_site_id: SiteId,
     watchpoints: StoppointCollection<Watchpoint>,
     next_watchpoint_id: WatchpointId,
+    syscall_catch_policy: SyscallCatchPolicy,
+    expecting_syscall_exit: bool,
 }
 
 impl Process {
@@ -176,6 +224,8 @@ impl Process {
             next_site_id: 1,
             watchpoints: StoppointCollection::default(),
             next_watchpoint_id: 1,
+            syscall_catch_policy: SyscallCatchPolicy::default(),
+            expecting_syscall_exit: false,
         };
 
         if debug {
@@ -203,6 +253,8 @@ impl Process {
             next_site_id: 1,
             watchpoints: StoppointCollection::default(),
             next_watchpoint_id: 1,
+            syscall_catch_policy: SyscallCatchPolicy::default(),
+            expecting_syscall_exit: false,
         };
         process.wait_on_signal()?;
         set_ptrace_options(pid)?;
@@ -231,7 +283,12 @@ impl Process {
             self.enable_breakpoint_site(id)?; // Re-enable the breakpoint
         }
 
-        ptrace::cont(self.pid, None).context("Could not resume process")?;
+        // Determine the request based on the syscall catch policy
+        if self.syscall_catch_policy.catches_none() {
+            ptrace::cont(self.pid, None).context("Could not resume process")?;
+        } else {
+            ptrace::syscall(self.pid, None).context("Could not resume process")?;
+        }
         self.state = ProcessState::Running;
         Ok(())
     }
@@ -258,25 +315,49 @@ impl Process {
     }
 
     pub fn wait_on_signal(&mut self) -> Result<StopReason> {
-        let status = waitpid(self.pid, None).context("waitpid failed")?;
-        let reason = StopReason::from(status);
-        self.state = reason.state;
+        loop {
+            let status = waitpid(self.pid, None).context("waitpid failed")?;
+            // Update the process state based on the wait status
+            let mut reason = StopReason::from(status);
+            self.state = reason.state;
 
-        if self.is_attached && self.state == ProcessState::Stopped {
-            self.read_all_registers()?;
-
-            // If stop caused by a software breakpoint, revert pc to breakpoint address
-            // NOTE: if the breakpoint is not created by xdb, pc will remain to be the next
-            // instruction
-            if reason.info == Signal::SIGTRAP as u8 {
-                let prev_pc = self.get_pc()? - 1;
-                if self.breakpoint_sites.enabled_at_address(prev_pc) {
-                    self.set_pc(prev_pc)?;
-                }
+            if !(self.is_attached && self.state == ProcessState::Stopped) {
+                return Ok(reason);
             }
-        }
 
-        Ok(reason)
+            // If the process is stopped, read all registers
+            self.read_all_registers()?;
+            self.augment_stop_reason(&mut reason)?;
+
+            match reason.trap {
+                // If stop caused by a software breakpoint, revert pc to breakpoint address
+                // NOTE: if the breakpoint is not created by xdb, pc will remain to be the next
+                // instruction
+                Some(TrapType::SoftwareBreakpoint) => {
+                    let prev_pc = self.get_pc()? - 1;
+                    if self.breakpoint_sites.enabled_at_address(prev_pc) {
+                        self.set_pc(prev_pc)?;
+                    }
+                }
+                Some(TrapType::HardwareStoppoint) => {
+                    // Watchpoint hit, record watchpoint data change
+                    if let HardwareStop::Watchpoint(id) = self.get_current_hardware_stoppoint()? {
+                        self.update_watchpoint_data(id)?;
+                    }
+                }
+                Some(TrapType::Syscall) => {
+                    // Skip this signal if syscall id needs not to be caught
+                    let id = reason.syscall.expect("syscall trap has syscall info").id;
+                    if !self.syscall_catch_policy.catches(id) {
+                        self.resume()?;
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+
+            return Ok(reason);
+        }
     }
 
     pub fn registers(&self) -> &Registers {
@@ -564,6 +645,70 @@ impl Process {
         }
 
         Ok(())
+    }
+
+    pub fn set_syscall_catch_policy(&mut self, policy: SyscallCatchPolicy) {
+        self.syscall_catch_policy = policy;
+    }
+
+    /// Classify a SIGTRAP stop from the kernel's `siginfo`, and for syscall
+    /// stops fill in the entry/exit details from the argument registers.
+    fn augment_stop_reason(&mut self, reason: &mut StopReason) -> Result<()> {
+        let info = inferior::get_signal_info(self.pid)?;
+
+        if reason.info == SIGTRAP {
+            reason.trap = Some(match info.si_code {
+                libc::TRAP_TRACE => TrapType::SingleStep,
+                // x86-64 reports SI_KERNEL for software breakpoints, not TRAP_BRKPT.
+                libc::SI_KERNEL => TrapType::SoftwareBreakpoint,
+                libc::TRAP_HWBKPT => TrapType::HardwareStoppoint,
+                _ => TrapType::Unknown,
+            });
+        } else if reason.info == SYSCALL_SIGTRAP {
+            reason.info = SIGTRAP; // Remove the 0x80
+            reason.trap = Some(TrapType::Syscall);
+            // Fill in syscall info
+            reason.syscall = Some(self.read_syscall_information()?);
+        } else {
+            reason.trap = Some(TrapType::Unknown);
+        }
+        Ok(())
+    }
+
+    fn read_syscall_information(&mut self) -> Result<SyscallInformation> {
+        let id = self.registers.read_by_id_as::<u64>(RegisterId::orig_rax)?;
+        if self.expecting_syscall_exit {
+            // Syscall exit
+            self.expecting_syscall_exit = false;
+            let ret = self.registers.read_by_id_as::<u64>(RegisterId::rax)? as i64;
+            Ok(SyscallInformation {
+                id,
+                is_entry: false,
+                args: None,
+                ret: Some(ret),
+            })
+        } else {
+            // Syscall entry
+            self.expecting_syscall_exit = true;
+            let arg_ids = [
+                RegisterId::rdi,
+                RegisterId::rsi,
+                RegisterId::rdx,
+                RegisterId::r10,
+                RegisterId::r8,
+                RegisterId::r9,
+            ];
+            let mut args = [0u64; 6];
+            for (slot, id) in args.iter_mut().zip(arg_ids) {
+                *slot = self.registers.read_by_id_as::<u64>(id)?;
+            }
+            Ok(SyscallInformation {
+                id,
+                is_entry: true,
+                args: Some(args),
+                ret: None,
+            })
+        }
     }
 
     pub fn write_register(&mut self, info: &RegisterInfo, value: RegisterValue) -> Result<()> {

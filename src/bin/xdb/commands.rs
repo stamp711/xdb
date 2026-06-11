@@ -1,4 +1,5 @@
 pub mod breakpoint;
+pub mod catchpoint;
 pub mod disassemble;
 pub mod memory;
 pub mod register;
@@ -26,6 +27,12 @@ pub fn print_help(args: &[&str]) {
             eprintln!("    read <address> [count]");
             eprintln!("    write <address> [0xff,0x00,...]");
         }
+        Some("catchpoint") => {
+            eprintln!("Available catchpoint commands:");
+            eprintln!("    syscall");
+            eprintln!("    syscall none");
+            eprintln!("    syscall <name|id>,...");
+        }
         Some("watchpoint") => {
             eprintln!("Available watchpoint commands:");
             eprintln!("    list");
@@ -37,6 +44,7 @@ pub fn print_help(args: &[&str]) {
         _ => {
             eprintln!("Available commands:");
             eprintln!("    breakpoint  - Commands for operating on breakpoints");
+            eprintln!("    catchpoint  - Commands for operating on catchpoints");
             eprintln!("    continue    - Resume the process");
             eprintln!("    disassemble - Disassemble instructions");
             eprintln!("    memory      - Commands for operating on memory");
