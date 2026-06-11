@@ -11,7 +11,10 @@ use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::{self, ForkResult, Pid};
 
 use crate::error::{ErrnoContext, Error, Result};
+use crate::inferior;
 use crate::pipe::Pipe;
+use crate::register_info::{DEBUG_REGISTER_IDS, RegisterId, RegisterInfo, RegisterKind};
+use crate::registers::{self, RegisterValue, Registers, USER_I387_OFFSET, USER_REGS_OFFSET};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessState {
@@ -80,6 +83,7 @@ pub struct Process {
     terminate_on_destruction: bool,
     is_attached: bool,
     state: ProcessState,
+    registers: Registers,
 }
 
 impl Process {
@@ -149,6 +153,7 @@ impl Process {
             terminate_on_destruction: true,
             is_attached: debug,
             state: ProcessState::Stopped,
+            registers: Registers::new(),
         };
 
         if debug {
@@ -171,6 +176,7 @@ impl Process {
             terminate_on_destruction: false,
             is_attached: true,
             state: ProcessState::Stopped,
+            registers: Registers::new(),
         };
         process.wait_on_signal()?;
         set_ptrace_options(pid)?;
@@ -196,7 +202,62 @@ impl Process {
         let status = waitpid(self.pid, None).context("waitpid failed")?;
         let reason = StopReason::from(status);
         self.state = reason.state;
+
+        if self.is_attached && self.state == ProcessState::Stopped {
+            self.read_all_registers()?;
+        }
+
         Ok(reason)
+    }
+
+    pub fn registers(&self) -> &Registers {
+        &self.registers
+    }
+
+    /// Refresh the whole register cache from the inferior. The GPRs and FPRs each come in one
+    /// ptrace call, but the debug registers are only reachable individually via the user area.
+    fn read_all_registers(&mut self) -> Result<()> {
+        let gprs = inferior::read_gprs(self.pid)?;
+        let gpr_bytes = crate::bit::as_bytes(&gprs);
+        self.registers.data[USER_REGS_OFFSET..USER_REGS_OFFSET + gpr_bytes.len()]
+            .copy_from_slice(gpr_bytes);
+
+        let fprs = inferior::read_fprs(self.pid)?;
+        let fpr_bytes = crate::bit::as_bytes(&fprs);
+        self.registers.data[USER_I387_OFFSET..USER_I387_OFFSET + fpr_bytes.len()]
+            .copy_from_slice(fpr_bytes);
+
+        for id in DEBUG_REGISTER_IDS {
+            let info = id.info();
+            let value = inferior::read_user_area(self.pid, info.offset)?;
+            self.registers.data[info.offset..info.offset + 8].copy_from_slice(&value.to_le_bytes());
+        }
+
+        Ok(())
+    }
+
+    pub fn write_register(&mut self, info: &RegisterInfo, value: RegisterValue) -> Result<()> {
+        // Update the cache, then flush the change back to the inferior.
+        let widened = registers::widen(info, value)?;
+        self.registers.data[info.offset..info.offset + info.size]
+            .copy_from_slice(&widened[..info.size]);
+
+        if info.kind == RegisterKind::Fpr {
+            // POKEUSER can't write the i387 area, so rewrite the whole FPR block.
+            let fprs: libc::user_fpregs_struct =
+                crate::bit::from_bytes(&self.registers.data[USER_I387_OFFSET..]);
+            inferior::write_fprs(self.pid, &fprs)
+        } else {
+            // POKEUSER writes a whole word, so flush the 8-byte-aligned word the
+            // register lives in.
+            let aligned = info.offset & !0b111;
+            let word = crate::bit::from_bytes::<u64>(&self.registers.data[aligned..]);
+            inferior::write_user_area(self.pid, aligned, word)
+        }
+    }
+
+    pub fn write_register_by_id(&mut self, id: RegisterId, value: RegisterValue) -> Result<()> {
+        self.write_register(id.info(), value)
     }
 }
 
