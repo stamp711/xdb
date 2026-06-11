@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+cpp_demangle = "0.5.1"
 iced-x86 = "1.21.0"
 libc = "0.2"
+memmap2 = "0.9.10"
 nix = { version = "0.31", features = ["fs", "personality", "process", "ptrace", "signal", "uio"] }
 rustyline = "17"
 

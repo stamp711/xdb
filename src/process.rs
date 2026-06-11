@@ -651,6 +651,24 @@ impl Process {
         self.syscall_catch_policy = policy;
     }
 
+    /// Read the process's auxiliary vector from `/proc/<pid>/auxv` as a map of
+    /// `AT_*` type to value.
+    pub fn get_auxv(&self) -> Result<std::collections::HashMap<u64, u64>> {
+        let bytes = std::fs::read(format!("/proc/{}/auxv", self.pid))
+            .map_err(|e| Error::new(format!("Failed to read auxv: {e}")))?;
+        let mut auxv = std::collections::HashMap::new();
+        for entry in bytes.chunks_exact(16) {
+            let key = u64::from_le_bytes(entry[..8].try_into().unwrap());
+            let value = u64::from_le_bytes(entry[8..].try_into().unwrap());
+            if key == 0 {
+                // AT_NULL marks the end of the auxv
+                break;
+            }
+            auxv.insert(key, value);
+        }
+        Ok(auxv)
+    }
+
     /// Classify a SIGTRAP stop from the kernel's `siginfo`, and for syscall
     /// stops fill in the entry/exit details from the argument registers.
     fn augment_stop_reason(&mut self, reason: &mut StopReason) -> Result<()> {

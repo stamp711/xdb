@@ -17,6 +17,9 @@ impl Pod for [u8; 8] {}
 impl Pod for [u8; 16] {}
 impl Pod for libc::user_regs_struct {}
 impl Pod for libc::user_fpregs_struct {}
+impl Pod for libc::Elf64_Ehdr {}
+impl Pod for libc::Elf64_Shdr {}
+impl Pod for libc::Elf64_Sym {}
 
 pub fn from_bytes<T: Pod>(bytes: &[u8]) -> T {
     assert!(bytes.len() >= size_of::<T>());
