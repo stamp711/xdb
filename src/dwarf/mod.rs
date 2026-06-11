@@ -4,6 +4,7 @@
 
 pub mod abbrev;
 pub mod attr;
+pub mod cfi;
 pub mod constants;
 pub mod cursor;
 pub mod die;
@@ -20,6 +21,7 @@ use memmap2::Mmap;
 use crate::elf::Elf;
 use crate::error::{Error, Result};
 use crate::types::FileAddr;
+use cfi::{BaseAddresses, CallFrameInformation};
 use constants::*;
 use die::{DieHandle, DieRef, parse_die};
 use line_table::LineTable;
@@ -46,6 +48,7 @@ pub struct Dwarf {
     sections: HashMap<&'static str, Range<usize>>,
     units: Vec<CompileUnit>,
     line_tables: Vec<Option<LineTable>>,
+    cfi: Option<CallFrameInformation>,
     function_index: OnceLock<HashMap<String, Vec<DieHandle>>>,
 }
 
@@ -64,6 +67,7 @@ impl Dwarf {
             sections,
             units: Vec::new(),
             line_tables: Vec::new(),
+            cfi: None,
             function_index: OnceLock::new(),
         };
         dwarf.units = parse_units(dwarf.section(".debug_info"), dwarf.section(".debug_abbrev"))?;
@@ -72,7 +76,19 @@ impl Dwarf {
             .iter()
             .map(|unit| line_table::parse_line_table(&dwarf, unit.id()))
             .collect::<Result<_>>()?;
+
+        let section_addr = |name: &str| elf.get_section_header(name).map_or(0, |shdr| shdr.sh_addr);
+        let bases = BaseAddresses {
+            eh_frame_hdr: section_addr(".eh_frame_hdr"),
+            eh_frame: section_addr(".eh_frame"),
+            text: section_addr(".text"),
+        };
+        dwarf.cfi = CallFrameInformation::parse(&dwarf, bases)?;
         Ok(dwarf)
+    }
+
+    pub fn cfi(&self) -> Option<&CallFrameInformation> {
+        self.cfi.as_ref()
     }
 
     pub fn line_table(&self, id: CuId) -> Option<&LineTable> {
