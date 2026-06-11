@@ -7,6 +7,7 @@ pub mod attr;
 pub mod constants;
 pub mod cursor;
 pub mod die;
+pub mod line_table;
 pub mod range_list;
 pub mod unit;
 
@@ -21,6 +22,7 @@ use crate::error::{Error, Result};
 use crate::types::FileAddr;
 use constants::*;
 use die::{DieHandle, DieRef, parse_die};
+use line_table::LineTable;
 use unit::{CompileUnit, CuId, parse_units};
 
 const SECTION_NAMES: &[&str] = &[
@@ -43,6 +45,7 @@ pub struct Dwarf {
     data: Arc<Mmap>,
     sections: HashMap<&'static str, Range<usize>>,
     units: Vec<CompileUnit>,
+    line_tables: Vec<Option<LineTable>>,
     function_index: OnceLock<HashMap<String, Vec<DieHandle>>>,
 }
 
@@ -60,10 +63,20 @@ impl Dwarf {
             data: Arc::clone(elf.data()),
             sections,
             units: Vec::new(),
+            line_tables: Vec::new(),
             function_index: OnceLock::new(),
         };
         dwarf.units = parse_units(dwarf.section(".debug_info"), dwarf.section(".debug_abbrev"))?;
+        dwarf.line_tables = dwarf
+            .units
+            .iter()
+            .map(|unit| line_table::parse_line_table(&dwarf, unit.id()))
+            .collect::<Result<_>>()?;
         Ok(dwarf)
+    }
+
+    pub fn line_table(&self, id: CuId) -> Option<&LineTable> {
+        self.line_tables[id.0].as_ref()
     }
 
     pub fn section(&self, name: &str) -> &[u8] {
