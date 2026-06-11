@@ -2,6 +2,7 @@ pub mod bit;
 pub mod breakpoint;
 mod debug_register;
 pub mod disassembler;
+pub mod dwarf;
 pub mod elf;
 pub mod error;
 mod inferior;
@@ -18,6 +19,7 @@ pub mod watchpoint;
 
 pub use breakpoint::{BreakpointSite, SiteId};
 pub use disassembler::{Disassembler, Instruction};
+pub use dwarf::Dwarf;
 pub use elf::Elf;
 pub use error::{Error, Result};
 pub use nix::unistd::Pid;

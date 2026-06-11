@@ -3,30 +3,42 @@ use std::path::{Path, PathBuf};
 
 use nix::unistd::Pid;
 
+use crate::dwarf::Dwarf;
 use crate::elf::Elf;
 use crate::error::{Error, Result};
 use crate::process::Process;
 use crate::types::VirtAddr;
 
-/// Owns a running process together with the static ELF (and, later, DWARF) of
-/// the program it is executing, and coordinates between the two.
+/// Owns a running process together with the static ELF and DWARF of the
+/// program it is executing, and coordinates between the two.
 pub struct Target {
     process: Process,
     elf: Elf,
+    dwarf: Dwarf,
 }
 
 impl Target {
     pub fn launch(path: &Path, stdout_replacement: Option<BorrowedFd<'_>>) -> Result<Self> {
         let process = Process::launch(path, true, stdout_replacement)?;
         let elf = load_elf(&process, path)?;
-        Ok(Self { process, elf })
+        let dwarf = Dwarf::new(&elf)?;
+        Ok(Self {
+            process,
+            elf,
+            dwarf,
+        })
     }
 
     pub fn attach(pid: Pid) -> Result<Self> {
         let process = Process::attach(pid)?;
         let exe = PathBuf::from(format!("/proc/{pid}/exe"));
         let elf = load_elf(&process, &exe)?;
-        Ok(Self { process, elf })
+        let dwarf = Dwarf::new(&elf)?;
+        Ok(Self {
+            process,
+            elf,
+            dwarf,
+        })
     }
 
     pub fn process(&self) -> &Process {
@@ -39,6 +51,10 @@ impl Target {
 
     pub fn elf(&self) -> &Elf {
         &self.elf
+    }
+
+    pub fn dwarf(&self) -> &Dwarf {
+        &self.dwarf
     }
 }
 

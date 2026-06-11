@@ -96,7 +96,7 @@ fn main() {
         let output = out_dir.join(target.name);
 
         let mut command = compiler.to_command();
-        command.arg("-g");
+        command.arg("-gdwarf-5");
         if !target.is_asm {
             command.args(["-O0", "-std=c++17"]);
         }
