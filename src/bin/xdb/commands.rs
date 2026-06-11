@@ -2,6 +2,7 @@ pub mod breakpoint;
 pub mod disassemble;
 pub mod memory;
 pub mod register;
+pub mod watchpoint;
 
 pub fn print_help(args: &[&str]) {
     match args.get(1).copied() {
@@ -25,6 +26,14 @@ pub fn print_help(args: &[&str]) {
             eprintln!("    read <address> [count]");
             eprintln!("    write <address> [0xff,0x00,...]");
         }
+        Some("watchpoint") => {
+            eprintln!("Available watchpoint commands:");
+            eprintln!("    list");
+            eprintln!("    set <address> <write|rw|execute> <size>");
+            eprintln!("    enable <id>");
+            eprintln!("    disable <id>");
+            eprintln!("    delete <id>");
+        }
         _ => {
             eprintln!("Available commands:");
             eprintln!("    breakpoint  - Commands for operating on breakpoints");
@@ -33,6 +42,7 @@ pub fn print_help(args: &[&str]) {
             eprintln!("    memory      - Commands for operating on memory");
             eprintln!("    register    - Commands for operating on registers");
             eprintln!("    stepi       - Step a single instruction");
+            eprintln!("    watchpoint  - Commands for operating on watchpoints");
         }
     }
 }

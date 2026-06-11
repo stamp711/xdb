@@ -45,7 +45,8 @@ fn set(process: &mut Process, args: &[&str]) -> xdb::Result<()> {
         eprintln!("Expected a valid hexadecimal address prefixed with '0x'");
         return Ok(());
     };
-    let id = process.create_breakpoint_site(VirtAddr(address), false, false)?;
+    let hardware = matches!(args.get(3).copied(), Some("-h" | "--hardware"));
+    let id = process.create_breakpoint_site(VirtAddr(address), hardware, false)?;
     process.enable_breakpoint_site(id)
 }
 

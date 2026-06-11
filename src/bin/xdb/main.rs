@@ -99,6 +99,7 @@ fn handle_command(process: &mut Process, line: &str) -> xdb::Result<()> {
         "breakpoint" | "b" => commands::breakpoint::handle(process, &args),
         "memory" | "mem" => commands::memory::handle(process, &args),
         "disassemble" | "disas" => commands::disassemble::handle(process, &args),
+        "watchpoint" | "w" => commands::watchpoint::handle(process, &args),
         "stepi" | "si" => {
             let reason = process.step_instruction()?;
             print_stop_reason(process, reason);

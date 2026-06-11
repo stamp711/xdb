@@ -14,7 +14,6 @@ pub struct BreakpointSite {
     pub(crate) original_byte: u8, // The original byte at the breakpoint address
     pub(crate) hardware: bool,
     pub(crate) internal: bool,
-    #[expect(dead_code, reason = "programmed in the hardware-breakpoint chapter")]
     pub(crate) hardware_register_index: Option<usize>,
 }
 

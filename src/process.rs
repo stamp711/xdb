@@ -11,15 +11,24 @@ use nix::sys::wait::{WaitStatus, waitpid};
 use nix::unistd::{self, ForkResult, Pid};
 
 use crate::breakpoint::{BreakpointSite, SiteId};
+use crate::debug_register;
 use crate::error::{ErrnoContext, Error, Result};
 use crate::inferior;
 use crate::pipe::Pipe;
 use crate::register_info::{DEBUG_REGISTER_IDS, RegisterId, RegisterInfo, RegisterKind};
 use crate::registers::{self, RegisterValue, Registers, USER_I387_OFFSET, USER_REGS_OFFSET};
 use crate::stoppoint::{Stoppoint, StoppointCollection};
-use crate::types::VirtAddr;
+use crate::types::{StoppointMode, VirtAddr};
+use crate::watchpoint::{Watchpoint, WatchpointId};
 
 const INT3: u8 = 0xCC;
+
+/// Which hardware stoppoint a debug-register trap belongs to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HardwareStop {
+    Breakpoint(SiteId),
+    Watchpoint(WatchpointId),
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ProcessState {
@@ -91,6 +100,8 @@ pub struct Process {
     registers: Registers,
     breakpoint_sites: StoppointCollection<BreakpointSite>,
     next_site_id: SiteId,
+    watchpoints: StoppointCollection<Watchpoint>,
+    next_watchpoint_id: WatchpointId,
 }
 
 impl Process {
@@ -163,6 +174,8 @@ impl Process {
             registers: Registers::new(),
             breakpoint_sites: StoppointCollection::default(),
             next_site_id: 1,
+            watchpoints: StoppointCollection::default(),
+            next_watchpoint_id: 1,
         };
 
         if debug {
@@ -188,6 +201,8 @@ impl Process {
             registers: Registers::new(),
             breakpoint_sites: StoppointCollection::default(),
             next_site_id: 1,
+            watchpoints: StoppointCollection::default(),
+            next_watchpoint_id: 1,
         };
         process.wait_on_signal()?;
         set_ptrace_options(pid)?;
@@ -310,14 +325,17 @@ impl Process {
         if site.enabled {
             return Ok(());
         }
-        if site.hardware {
-            return Err(Error::new("Hardware breakpoints are not yet supported"));
+        let (address, hardware) = (site.address, site.hardware);
+
+        if hardware {
+            let slot = self.set_hardware_stoppoint(address, StoppointMode::Execute, 1)?;
+            let site = self.breakpoint_sites.get_by_id_mut(id)?;
+            site.hardware_register_index = Some(slot);
+        } else {
+            let original = inferior::replace_byte(self.pid, address.addr(), INT3)?;
+            self.breakpoint_sites.get_by_id_mut(id)?.original_byte = original;
         }
-        let address = site.address.addr();
-        let original = inferior::replace_byte(self.pid, address, INT3)?;
-        let site = self.breakpoint_sites.get_by_id_mut(id)?;
-        site.original_byte = original;
-        site.enabled = true;
+        self.breakpoint_sites.get_by_id_mut(id)?.enabled = true;
         Ok(())
     }
 
@@ -327,12 +345,18 @@ impl Process {
         if !site.enabled || process_gone {
             return Ok(());
         }
+
         if site.hardware {
-            return Err(Error::new("Hardware breakpoints are not yet supported"));
+            if let Some(slot) = site.hardware_register_index {
+                self.clear_hardware_stoppoint(slot)?;
+            }
+        } else {
+            let (address, original) = (site.address.addr(), site.original_byte);
+            inferior::replace_byte(self.pid, address, original)?;
         }
-        let (address, original) = (site.address.addr(), site.original_byte);
-        inferior::replace_byte(self.pid, address, original)?;
-        self.breakpoint_sites.get_by_id_mut(id)?.enabled = false;
+        let site = self.breakpoint_sites.get_by_id_mut(id)?;
+        site.hardware_register_index = None;
+        site.enabled = false;
         Ok(())
     }
 
@@ -373,6 +397,151 @@ impl Process {
     pub fn read_memory_as<T: crate::bit::Pod>(&self, address: VirtAddr) -> Result<T> {
         let data = self.read_memory(address, size_of::<T>())?;
         Ok(crate::bit::from_bytes(&data))
+    }
+
+    pub fn watchpoints(&self) -> &StoppointCollection<Watchpoint> {
+        &self.watchpoints
+    }
+
+    pub fn create_watchpoint(
+        &mut self,
+        address: VirtAddr,
+        mode: StoppointMode,
+        size: usize,
+    ) -> Result<WatchpointId> {
+        if self.watchpoints.contains_address(address) {
+            return Err(Error::new(format!(
+                "Watchpoint already created at address {address}"
+            )));
+        }
+        // Check address alignment
+        if address.addr() & (size as u64 - 1) != 0 {
+            return Err(Error::new("Watchpoint address must be aligned to size"));
+        }
+        let id = self.next_watchpoint_id;
+        self.next_watchpoint_id += 1;
+        self.watchpoints
+            .push(Watchpoint::new(id, address, mode, size));
+        self.update_watchpoint_data(id)?;
+        Ok(id)
+    }
+
+    pub fn enable_watchpoint(&mut self, id: WatchpointId) -> Result<()> {
+        let watchpoint = self.watchpoints.get_by_id(id)?;
+        if watchpoint.enabled {
+            return Ok(());
+        }
+        let (address, mode, size) = (watchpoint.address, watchpoint.mode, watchpoint.size);
+        let slot = self.set_hardware_stoppoint(address, mode, size)?;
+        let watchpoint = self.watchpoints.get_by_id_mut(id)?;
+        watchpoint.hardware_register_index = Some(slot);
+        watchpoint.enabled = true;
+        Ok(())
+    }
+
+    pub fn disable_watchpoint(&mut self, id: WatchpointId) -> Result<()> {
+        let watchpoint = self.watchpoints.get_by_id(id)?;
+        let process_gone = matches!(self.state, ProcessState::Exited | ProcessState::Terminated);
+        if !watchpoint.enabled || process_gone {
+            return Ok(());
+        }
+        if let Some(slot) = watchpoint.hardware_register_index {
+            self.clear_hardware_stoppoint(slot)?;
+        }
+        let watchpoint = self.watchpoints.get_by_id_mut(id)?;
+        watchpoint.hardware_register_index = None;
+        watchpoint.enabled = false;
+        Ok(())
+    }
+
+    pub fn remove_watchpoint(&mut self, id: WatchpointId) -> Result<()> {
+        self.disable_watchpoint(id)?;
+        self.watchpoints.remove_by_id(id)?;
+        Ok(())
+    }
+
+    /// Sample the watched memory, rolling the previous value forward.
+    pub fn update_watchpoint_data(&mut self, id: WatchpointId) -> Result<()> {
+        let (address, size) = {
+            let watchpoint = self.watchpoints.get_by_id(id)?;
+            (watchpoint.address, watchpoint.size)
+        };
+        let bytes = self.read_memory(address, size)?;
+        let mut new_data = [0u8; 8];
+        new_data[..size].copy_from_slice(&bytes[..size]);
+        let new_data = u64::from_le_bytes(new_data);
+
+        let watchpoint = self.watchpoints.get_by_id_mut(id)?;
+        watchpoint.previous_data = watchpoint.data;
+        watchpoint.data = new_data;
+        Ok(())
+    }
+
+    /// Identify which hardware stoppoint triggered the current trap.
+    pub fn get_current_hardware_stoppoint(&self) -> Result<HardwareStop> {
+        // Get index of the hit hardware stoppoint from DR6
+        let dr6 = self.registers.read_by_id_as::<u64>(RegisterId::dr6)?;
+        let slot = dr6.trailing_zeros() as usize; // Bit 0-3 encodes the hit hardware stoppoint
+
+        // Get watchpoint address from DR register
+        let address = VirtAddr(
+            self.registers
+                .read_by_id_as::<u64>(DEBUG_REGISTER_IDS[slot])?,
+        );
+
+        // Get watchpoint mode from DR7
+        let dr7 = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+        let mode_bits = (dr7 >> (debug_register::MODE_BITS_OFFSET + 4 * slot)) & 0b11;
+        let mode = debug_register::decode_mode(mode_bits)?;
+
+        if mode == StoppointMode::Execute {
+            Ok(HardwareStop::Breakpoint(
+                self.breakpoint_sites.get_by_address(address)?.id(),
+            ))
+        } else {
+            Ok(HardwareStop::Watchpoint(
+                self.watchpoints.get_by_address(address)?.id(),
+            ))
+        }
+    }
+
+    fn set_hardware_stoppoint(
+        &mut self,
+        address: VirtAddr,
+        mode: StoppointMode,
+        size: usize,
+    ) -> Result<usize> {
+        let mode_flag = debug_register::encode_mode(mode);
+        let size_flag = debug_register::encode_size(size)?;
+
+        let mut control = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+
+        // Find a free slot for the stoppoint
+        let slot = debug_register::find_free_slot(control)?;
+
+        // Calculate the control bits locations for the stoppoint
+        let enable_bits = 2 * slot;
+        let mode_bits = debug_register::MODE_BITS_OFFSET + 4 * slot;
+        let size_bits = mode_bits + 2;
+
+        // Calculate the control bits for the stoppoint
+        let mask = (0b11 << enable_bits) | (0b11 << mode_bits) | (0b11 << size_bits);
+        let flag = (0b01 << enable_bits) | (mode_flag << mode_bits) | (size_flag << size_bits);
+
+        // Set the control bits for the stoppoint
+        control = (control & !mask) | flag;
+
+        // Write the address and control bits to the registers
+        self.write_register_by_id(DEBUG_REGISTER_IDS[slot], RegisterValue::U64(address.addr()))?;
+        self.write_register_by_id(RegisterId::dr7, RegisterValue::U64(control))?;
+        Ok(slot)
+    }
+
+    fn clear_hardware_stoppoint(&mut self, slot: usize) -> Result<()> {
+        let mut control = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+        // Clear the stoppoint
+        control &= !(0b11u64 << (2 * slot));
+        self.write_register_by_id(RegisterId::dr7, RegisterValue::U64(control))
     }
 
     /// Refresh the whole register cache from the inferior. The GPRs and FPRs each come in one
