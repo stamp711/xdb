@@ -1,6 +1,8 @@
+use bitvec::array::BitArray;
+
 use crate::bit::{self, from_bytes};
 use crate::error::{Error, Result};
-use crate::register_info::{RegisterFormat, RegisterId, RegisterInfo};
+use crate::register_info::{RegisterFormat, RegisterInfo};
 
 pub(crate) const USER_SIZE: usize = size_of::<libc::user>();
 pub(crate) const USER_REGS_OFFSET: usize = std::mem::offset_of!(libc::user, regs);
@@ -92,19 +94,40 @@ impl TryFrom<RegisterValue> for [u8; 16] {
 /// the register table.
 pub struct Registers {
     pub(crate) data: [u8; USER_SIZE],
+    undefined_bits: BitArray<[u8; USER_SIZE.div_ceil(8)]>,
 }
 
 impl Registers {
     pub(crate) fn new() -> Self {
         Self {
             data: [0; USER_SIZE],
+            undefined_bits: BitArray::ZERO,
         }
     }
 
-    pub fn read(&self, info: &RegisterInfo) -> Result<RegisterValue> {
-        let bytes = &self.data[info.offset..info.offset + info.size];
-        match info.format {
-            RegisterFormat::Uint => match info.size {
+    pub fn is_undefined(&self, reg: impl AsRef<RegisterInfo>) -> bool {
+        let reg = reg.as_ref();
+        self.undefined_bits[reg.offset..reg.offset + reg.size].any()
+    }
+
+    pub fn set_undefined(&mut self, reg: impl AsRef<RegisterInfo>) {
+        let reg = reg.as_ref();
+        self.undefined_bits[reg.offset..reg.offset + reg.size].fill(true);
+    }
+
+    pub fn set_defined(&mut self, reg: impl AsRef<RegisterInfo>) {
+        let reg = reg.as_ref();
+        self.undefined_bits[reg.offset..reg.offset + reg.size].fill(false);
+    }
+
+    pub fn read(&self, reg: impl AsRef<RegisterInfo>) -> Result<RegisterValue> {
+        let reg = reg.as_ref();
+        if self.is_undefined(reg) {
+            return Err(Error::new(format!("Register {} is undefined", reg.name)));
+        }
+        let bytes = &self.data[reg.offset..reg.offset + reg.size];
+        match reg.format {
+            RegisterFormat::Uint => match reg.size {
                 1 => Ok(RegisterValue::U8(from_bytes(bytes))),
                 2 => Ok(RegisterValue::U16(from_bytes(bytes))),
                 4 => Ok(RegisterValue::U32(from_bytes(bytes))),
@@ -115,7 +138,7 @@ impl Registers {
             },
             RegisterFormat::DoubleFloat => Ok(RegisterValue::F64(from_bytes(bytes))),
             RegisterFormat::LongDouble => Ok(RegisterValue::LongDouble(from_bytes(bytes))),
-            RegisterFormat::Vector => match info.size {
+            RegisterFormat::Vector => match reg.size {
                 8 => Ok(RegisterValue::Byte64(from_bytes(bytes))),
                 16 => Ok(RegisterValue::Byte128(from_bytes(bytes))),
                 size => Err(Error::new(format!(
@@ -125,15 +148,19 @@ impl Registers {
         }
     }
 
-    pub fn read_by_id(&self, id: RegisterId) -> Result<RegisterValue> {
-        self.read(id.info())
-    }
-
-    pub fn read_by_id_as<T>(&self, id: RegisterId) -> Result<T>
+    pub fn read_as<T>(&self, reg: impl AsRef<RegisterInfo>) -> Result<T>
     where
         T: TryFrom<RegisterValue, Error = Error>,
     {
-        T::try_from(self.read_by_id(id)?)
+        T::try_from(self.read(reg)?)
+    }
+
+    pub fn write(&mut self, reg: impl AsRef<RegisterInfo>, val: RegisterValue) -> Result<()> {
+        let reg = reg.as_ref();
+        let widened = widen(reg, val)?;
+        self.data[reg.offset..reg.offset + reg.size].copy_from_slice(&widened[..reg.size]);
+        self.set_defined(reg);
+        Ok(())
     }
 }
 

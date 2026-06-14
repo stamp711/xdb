@@ -16,7 +16,7 @@ use crate::error::{ErrnoContext, Error, Result};
 use crate::inferior;
 use crate::pipe::Pipe;
 use crate::register_info::{DEBUG_REGISTER_IDS, RegisterId, RegisterInfo, RegisterKind};
-use crate::registers::{self, RegisterValue, Registers, USER_I387_OFFSET, USER_REGS_OFFSET};
+use crate::registers::{RegisterValue, Registers, USER_I387_OFFSET, USER_REGS_OFFSET};
 use crate::stoppoint::{Stoppoint, StoppointCollection};
 use crate::types::{StoppointMode, VirtAddr};
 use crate::watchpoint::{Watchpoint, WatchpointId};
@@ -399,9 +399,7 @@ impl Process {
     }
 
     pub fn get_pc(&self) -> Result<VirtAddr> {
-        Ok(VirtAddr(
-            self.registers.read_by_id_as::<u64>(RegisterId::rip)?,
-        ))
+        Ok(VirtAddr(self.registers.read_as::<u64>(RegisterId::rip)?))
     }
 
     pub fn set_pc(&mut self, addr: VirtAddr) -> Result<()> {
@@ -595,17 +593,14 @@ impl Process {
     /// Identify which hardware stoppoint triggered the current trap.
     pub fn get_current_hardware_stoppoint(&self) -> Result<HardwareStop> {
         // Get index of the hit hardware stoppoint from DR6
-        let dr6 = self.registers.read_by_id_as::<u64>(RegisterId::dr6)?;
+        let dr6 = self.registers.read_as::<u64>(RegisterId::dr6)?;
         let slot = dr6.trailing_zeros() as usize; // Bit 0-3 encodes the hit hardware stoppoint
 
         // Get watchpoint address from DR register
-        let address = VirtAddr(
-            self.registers
-                .read_by_id_as::<u64>(DEBUG_REGISTER_IDS[slot])?,
-        );
+        let address = VirtAddr(self.registers.read_as::<u64>(DEBUG_REGISTER_IDS[slot])?);
 
         // Get watchpoint mode from DR7
-        let dr7 = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+        let dr7 = self.registers.read_as::<u64>(RegisterId::dr7)?;
         let mode_bits = (dr7 >> (debug_register::MODE_BITS_OFFSET + 4 * slot)) & 0b11;
         let mode = debug_register::decode_mode(mode_bits)?;
 
@@ -629,7 +624,7 @@ impl Process {
         let mode_flag = debug_register::encode_mode(mode);
         let size_flag = debug_register::encode_size(size)?;
 
-        let mut control = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+        let mut control = self.registers.read_as::<u64>(RegisterId::dr7)?;
 
         // Find a free slot for the stoppoint
         let slot = debug_register::find_free_slot(control)?;
@@ -653,7 +648,7 @@ impl Process {
     }
 
     fn clear_hardware_stoppoint(&mut self, slot: usize) -> Result<()> {
-        let mut control = self.registers.read_by_id_as::<u64>(RegisterId::dr7)?;
+        let mut control = self.registers.read_as::<u64>(RegisterId::dr7)?;
         // Clear the stoppoint
         control &= !(0b11u64 << (2 * slot));
         self.write_register_by_id(RegisterId::dr7, RegisterValue::U64(control))
@@ -728,11 +723,11 @@ impl Process {
     }
 
     fn read_syscall_information(&mut self) -> Result<SyscallInformation> {
-        let id = self.registers.read_by_id_as::<u64>(RegisterId::orig_rax)?;
+        let id = self.registers.read_as::<u64>(RegisterId::orig_rax)?;
         if self.expecting_syscall_exit {
             // Syscall exit
             self.expecting_syscall_exit = false;
-            let ret = self.registers.read_by_id_as::<u64>(RegisterId::rax)? as i64;
+            let ret = self.registers.read_as::<u64>(RegisterId::rax)? as i64;
             Ok(SyscallInformation {
                 id,
                 is_entry: false,
@@ -752,7 +747,7 @@ impl Process {
             ];
             let mut args = [0u64; 6];
             for (slot, id) in args.iter_mut().zip(arg_ids) {
-                *slot = self.registers.read_by_id_as::<u64>(id)?;
+                *slot = self.registers.read_as::<u64>(id)?;
             }
             Ok(SyscallInformation {
                 id,
@@ -765,9 +760,7 @@ impl Process {
 
     pub fn write_register(&mut self, info: &RegisterInfo, value: RegisterValue) -> Result<()> {
         // Update the cache, then flush the change back to the inferior.
-        let widened = registers::widen(info, value)?;
-        self.registers.data[info.offset..info.offset + info.size]
-            .copy_from_slice(&widened[..info.size]);
+        self.registers.write(info, value)?;
 
         if info.kind == RegisterKind::Fpr {
             // POKEUSER can't write the i387 area, so rewrite the whole FPR block.

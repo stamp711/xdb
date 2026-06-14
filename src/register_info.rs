@@ -30,6 +30,12 @@ pub struct RegisterInfo {
     pub format: RegisterFormat,
 }
 
+impl AsRef<RegisterInfo> for RegisterInfo {
+    fn as_ref(&self) -> &RegisterInfo {
+        self
+    }
+}
+
 // Sub-registers alias their parent's storage: `eax`/`ax`/`al` all sit at `rax`'s
 // offset and differ only in size. High-byte registers (`ah`, ...) start one
 // byte further in.
@@ -243,6 +249,12 @@ pub const DEBUG_REGISTER_IDS: [RegisterId; 8] = [
 impl RegisterId {
     pub fn info(self) -> &'static RegisterInfo {
         &REGISTER_INFOS[self as usize]
+    }
+}
+
+impl AsRef<RegisterInfo> for RegisterId {
+    fn as_ref(&self) -> &RegisterInfo {
+        self.info()
     }
 }
 

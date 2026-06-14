@@ -64,10 +64,7 @@ fn read_registers() {
     process.resume().unwrap();
     process.wait_on_signal().unwrap();
     assert_eq!(
-        process
-            .registers()
-            .read_by_id_as::<u64>(RegisterId::r13)
-            .unwrap(),
+        process.registers().read_as::<u64>(RegisterId::r13).unwrap(),
         0xdead_beef_cafe_babe
     );
 
@@ -76,7 +73,7 @@ fn read_registers() {
     assert_eq!(
         process
             .registers()
-            .read_by_id_as::<u32>(RegisterId::r13d)
+            .read_as::<u32>(RegisterId::r13d)
             .unwrap(),
         0xabcd_ef01
     );
@@ -86,7 +83,7 @@ fn read_registers() {
     assert_eq!(
         process
             .registers()
-            .read_by_id_as::<u16>(RegisterId::r13w)
+            .read_as::<u16>(RegisterId::r13w)
             .unwrap(),
         0x1234
     );
@@ -94,20 +91,14 @@ fn read_registers() {
     process.resume().unwrap();
     process.wait_on_signal().unwrap();
     assert_eq!(
-        process
-            .registers()
-            .read_by_id_as::<u8>(RegisterId::r13b)
-            .unwrap(),
+        process.registers().read_as::<u8>(RegisterId::r13b).unwrap(),
         42
     );
 
     process.resume().unwrap();
     process.wait_on_signal().unwrap();
     assert_eq!(
-        process
-            .registers()
-            .read_by_id_as::<u8>(RegisterId::ah)
-            .unwrap(),
+        process.registers().read_as::<u8>(RegisterId::ah).unwrap(),
         41
     );
 
@@ -116,7 +107,7 @@ fn read_registers() {
     assert_eq!(
         process
             .registers()
-            .read_by_id_as::<[u8; 8]>(RegisterId::mm0)
+            .read_as::<[u8; 8]>(RegisterId::mm0)
             .unwrap(),
         to_byte64(0xba5e_ba11_u64)
     );
@@ -126,14 +117,14 @@ fn read_registers() {
     assert_eq!(
         process
             .registers()
-            .read_by_id_as::<[u8; 16]>(RegisterId::xmm0)
+            .read_as::<[u8; 16]>(RegisterId::xmm0)
             .unwrap(),
         to_byte128(42.25_f64)
     );
 
     process.resume().unwrap();
     process.wait_on_signal().unwrap();
-    let st0 = process.registers().read_by_id(RegisterId::st0).unwrap();
+    let st0 = process.registers().read(RegisterId::st0).unwrap();
     let RegisterValue::LongDouble(bytes) = st0 else {
         panic!("expected long double, got {st0:?}");
     };

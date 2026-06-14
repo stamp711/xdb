@@ -490,10 +490,7 @@ impl Target {
         //
         // Use rbp as frame pointer for now. UB if -fomit-frame-pointer.
         // TODO: do DWARF stack unwinding to determine return addr
-        let rbp = self
-            .process
-            .registers()
-            .read_by_id_as::<u64>(RegisterId::rbp)?;
+        let rbp = self.process.registers().read_as::<u64>(RegisterId::rbp)?;
         let return_address = self.process.read_memory_as::<u64>(VirtAddr(rbp + 8))?;
         self.run_until_address(VirtAddr(return_address))
     }
