@@ -155,6 +155,8 @@ impl<'dw> DieRef<'dw> {
         })
     }
 
+    /// The source file where this DIE appears: the call site (`DW_AT_call_file`) for an
+    /// inlined subroutine, the declaration (`DW_AT_decl_file`) otherwise.
     pub fn file(&self) -> Result<&'dw FileEntry> {
         let file_idx = if self.tag() == DW_TAG_inlined_subroutine {
             self.attr(DW_AT_call_file)
@@ -171,6 +173,8 @@ impl<'dw> DieRef<'dw> {
             .file(file_idx))
     }
 
+    /// The source line where this DIE appears: the call site (`DW_AT_call_line`) for an
+    /// inlined subroutine, the declaration (`DW_AT_decl_line`) otherwise.
     pub fn line(&self) -> Result<u64> {
         if self.tag() == DW_TAG_inlined_subroutine {
             return self

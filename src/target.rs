@@ -119,24 +119,41 @@ impl Target {
 
 // -- address and source lookups --
 impl Target {
-    pub fn get_pc_file_address(&self) -> Option<FileAddr> {
-        self.elf.virt_addr_to_file(self.process.get_pc().ok()?)
+    pub fn get_pc_file_addr(&self) -> Option<FileAddr> {
+        self.virt_addr_to_file(self.process.get_pc().ok()?)
+    }
+
+    fn virt_addr_to_file(&self, virt: VirtAddr) -> Option<FileAddr> {
+        self.elf.virt_addr_to_file(virt)
+    }
+
+    fn file_addr_to_virt(&self, file_address: FileAddr) -> Result<VirtAddr> {
+        self.elf
+            .file_addr_to_virt(file_address)
+            .ok_or_else(|| Error::new("Address is not in a loaded section"))
     }
 
     pub fn line_entry_at_pc(&self) -> Option<crate::dwarf::line_table::LineEntry> {
-        let fpc = self.get_pc_file_address()?;
+        let fpc = self.get_pc_file_addr()?;
         let cu = self.dwarf.unit_containing_address(fpc)?;
         self.dwarf
             .line_table(cu)?
             .entry_at_address(&self.dwarf, fpc)
     }
 
-    pub fn source_file_at_pc(&self) -> Option<PathBuf> {
-        let fpc = self.get_pc_file_address()?;
+    fn source_location_at_pc(&self) -> Option<SourceLocation> {
+        let fpc = self.get_pc_file_addr()?;
         let cu = self.dwarf.unit_containing_address(fpc)?;
         let table = self.dwarf.line_table(cu)?;
         let entry = table.entry_at_address(&self.dwarf, fpc)?;
-        Some(table.file(entry.file_index).path.clone())
+        Some(SourceLocation {
+            file: table.file(entry.file_index).clone(),
+            line: entry.line,
+        })
+    }
+
+    pub fn source_file_at_pc(&self) -> Option<PathBuf> {
+        Some(self.source_location_at_pc()?.file.path)
     }
 
     pub fn function_name_at_address(&self, address: VirtAddr) -> String {
@@ -168,7 +185,7 @@ impl Target {
                     .get_pc()
                     .ok()
                     .map(|pc| self.function_name_at_address(pc)),
-                source: self.source_at_pc(),
+                source: self.source_location_at_pc(),
             };
         }
         // The focused frame's name comes from its own DIE. Its source line lives on its
@@ -183,19 +200,8 @@ impl Target {
             source: inline
                 .get(i + 1)
                 .and_then(|h| self.dwarf.die(*h).location().ok())
-                .or_else(|| self.source_at_pc()),
+                .or_else(|| self.source_location_at_pc()),
         }
-    }
-
-    fn source_at_pc(&self) -> Option<SourceLocation> {
-        let fpc = self.get_pc_file_address()?;
-        let cu = self.dwarf.unit_containing_address(fpc)?;
-        let table = self.dwarf.line_table(cu)?;
-        let entry = table.entry_at_address(&self.dwarf, fpc)?;
-        Some(SourceLocation {
-            file: table.file(entry.file_index).clone(),
-            line: entry.line,
-        })
     }
 }
 
@@ -411,7 +417,7 @@ impl Target {
     /// Returns the DIEs of the inline stack at the current pc, with the outermost function (which
     /// itself is not inlined) at the beginning. Contains (max_inline_height + 1) frames.
     pub fn inline_stack_at_pc(&self) -> Vec<DieHandle> {
-        match self.get_pc_file_address() {
+        match self.get_pc_file_addr() {
             Some(fpc) => self.dwarf.inline_stack_at_address(fpc),
             None => Vec::new(),
         }
@@ -426,7 +432,7 @@ impl Target {
 
         let inline_stack = self.inline_stack_at_pc();
 
-        if let Some(fpc) = self.get_pc_file_address() {
+        if let Some(fpc) = self.get_pc_file_addr() {
             // Increment the inline height for each function beginning at the current PC
             // TODO: should we count the DW_TAG_subprogram? Remember to check this when implementing bt.
             let height = inline_stack
@@ -474,7 +480,7 @@ impl Target {
         // Step over function prologue if needed: if we are at the start of a function (prologue),
         // step to the next line table entry. GCC: the first line table entry for a function marks
         // the start of the prologue.
-        if let Some(fpc) = self.get_pc_file_address()
+        if let Some(fpc) = self.get_pc_file_addr()
             && let Some(handle) = self.dwarf.function_containing_address(fpc)
             && self.dwarf.die(handle).low_pc().ok() == Some(fpc)
             && let Some(entry) = self.line_entry_at_pc()
@@ -502,7 +508,7 @@ impl Target {
                 let die = self
                     .dwarf
                     .die(inline_stack[self.stack.current_inline_index() + 1]);
-                let end = self.virt_of(die.high_pc()?)?;
+                let end = self.file_addr_to_virt(die.high_pc()?)?;
                 reason = self.run_until_address(end)?;
                 if !reason.is_step() || self.process.get_pc()? != end {
                     return Ok(reason);
@@ -544,7 +550,7 @@ impl Target {
             let die = self
                 .dwarf
                 .die(inline_stack[self.stack.current_inline_index()]);
-            let end = self.virt_of(die.high_pc()?)?;
+            let end = self.file_addr_to_virt(die.high_pc()?)?;
             return self.run_until_address(end);
         }
 
@@ -555,12 +561,6 @@ impl Target {
         let rbp = self.process.registers().read_as::<u64>(RegisterId::rbp)?;
         let return_address = self.process.read_memory_as::<u64>(VirtAddr(rbp + 8))?;
         self.run_until_address(VirtAddr(return_address))
-    }
-
-    fn virt_of(&self, file_address: FileAddr) -> Result<VirtAddr> {
-        self.elf
-            .file_addr_to_virt(file_address)
-            .ok_or_else(|| Error::new("Address is not in a loaded section"))
     }
 }
 
