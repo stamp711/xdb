@@ -7,8 +7,8 @@ use crate::registers::{RegisterValue, Registers};
 /// current pc. Updated by `Target` on every stop.
 #[derive(Default)]
 pub struct Stack {
-    pub(crate) inline_height: usize,
-    pub(crate) inline_stack_size: usize,
+    inline_stack_size: usize,
+    inline_height: usize,
 }
 
 impl Stack {
@@ -16,19 +16,20 @@ impl Stack {
     pub fn inline_height(&self) -> usize {
         self.inline_height
     }
-
-    pub fn has_inlined_frames(&self) -> bool {
+    pub fn has_inline_frames(&self) -> bool {
         self.inline_stack_size > 1 // first item is the outermost function
     }
-
     /// Index of the current frame within the inline stack (0 is the outermost,
     /// non-inlined function).
-    pub fn current_index(&self) -> usize {
+    pub fn current_inline_index(&self) -> usize {
         self.inline_stack_size - self.inline_height - 1
     }
-
-    pub(crate) fn simulate_inlined_step_in(&mut self) {
+    pub(crate) fn simulate_inline_step_in(&mut self) {
         self.inline_height -= 1;
+    }
+    pub(crate) fn reset_inline_stack(&mut self, inline_stack_size: usize, inline_height: usize) {
+        self.inline_height = inline_height;
+        self.inline_stack_size = inline_stack_size;
     }
 }
 

@@ -364,27 +364,28 @@ impl Target {
     /// Calculate and set the inline height to the max possible inline height on current pc.
     fn reset_inline_height(&mut self) -> Result<()> {
         if self.process.state() != ProcessState::Stopped {
-            self.stack.inline_height = 0;
-            self.stack.inline_stack_size = 0;
+            self.stack.reset_inline_stack(0, 0);
             return Ok(());
         }
 
         let inline_stack = self.inline_stack_at_pc();
-        self.stack.inline_stack_size = inline_stack.len();
-        self.stack.inline_height = 0;
 
-        let Some(fpc) = self.get_pc_file_address() else {
-            return Ok(());
+        if let Some(fpc) = self.get_pc_file_address() {
+            // Increment the inline height for each function beginning at the current PC
+            // TODO: should we count the DW_TAG_subprogram? Remember to check this when implementing bt.
+            let height = inline_stack
+                .iter()
+                .rev()
+                .take_while(|handle| {
+                    let die = self.dwarf.die(**handle);
+                    die.tag() == DW_TAG_inlined_subroutine && die.low_pc().ok() == Some(fpc)
+                })
+                .count();
+            self.stack.reset_inline_stack(inline_stack.len(), height);
+        } else {
+            self.stack.reset_inline_stack(inline_stack.len(), 0);
         };
-        // Increment the inline height for each function beginning at the current PC
-        // TODO: should we count the DW_TAG_subprogram? Remember to check this when implementing bt.
-        for handle in inline_stack.iter().rev() {
-            let die = self.dwarf.die(*handle);
-            if die.tag() != DW_TAG_inlined_subroutine || die.low_pc().ok() != Some(fpc) {
-                break;
-            }
-            self.stack.inline_height += 1;
-        }
+
         Ok(())
     }
 
@@ -392,8 +393,8 @@ impl Target {
 
     pub fn step_in(&mut self) -> Result<StopReason> {
         // Simulate step if we are currently in an inlined function
-        if self.stack.inline_height > 0 {
-            self.stack.simulate_inlined_step_in();
+        if self.stack.inline_height() > 0 {
+            self.stack.simulate_inline_step_in();
             return Ok(StopReason::single_step());
         }
 
@@ -438,10 +439,12 @@ impl Target {
         let mut reason;
         loop {
             let pc = self.process.get_pc()?;
-            if self.stack.has_inlined_frames() && self.stack.inline_height > 0 {
+            if self.stack.has_inline_frames() && self.stack.inline_height() > 0 {
                 // We are above an inlined subroutine, run to end of it
                 let inline_stack = self.inline_stack_at_pc();
-                let die = self.dwarf.die(inline_stack[self.stack.current_index() + 1]);
+                let die = self
+                    .dwarf
+                    .die(inline_stack[self.stack.current_inline_index() + 1]);
                 let end = self.virt_of(die.high_pc()?)?;
                 reason = self.run_until_address(end)?;
                 if !reason.is_step() || self.process.get_pc()? != end {
@@ -479,9 +482,11 @@ impl Target {
 
     pub fn step_out(&mut self) -> Result<StopReason> {
         // If we are in inlined subroutine, run to end of it
-        if self.stack.has_inlined_frames() && self.stack.current_index() != 0 {
+        if self.stack.has_inline_frames() && self.stack.current_inline_index() != 0 {
             let inline_stack = self.inline_stack_at_pc();
-            let die = self.dwarf.die(inline_stack[self.stack.current_index()]);
+            let die = self
+                .dwarf
+                .die(inline_stack[self.stack.current_inline_index()]);
             let end = self.virt_of(die.high_pc()?)?;
             return self.run_until_address(end);
         }
