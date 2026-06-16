@@ -12,9 +12,7 @@ use super::Dwarf;
 use super::constants::*;
 use super::cursor::Cursor;
 use crate::error::{Error, Result};
-use crate::register_info::register_info_by_dwarf_id;
 use crate::types::FileAddr;
-use crate::{RegisterId, RegisterInfo, RegisterValue, Registers};
 
 pub struct CallFrameInformation {
     eh_hdr: EhHdr,
@@ -641,50 +639,4 @@ impl CallFrameInformation {
             register_rules: ctx.register_rules,
         })
     }
-}
-
-fn unwind_registers(
-    current: &Registers,
-    row: &UnwindRow,
-    read: impl Fn(u64) -> Result<u64>,
-) -> Result<Registers> {
-    let mut unwond = current.clone();
-
-    let rinfo = |dwarf_id: u64| -> Result<&'static RegisterInfo> {
-        i32::try_from(dwarf_id)
-            .ok()
-            .and_then(register_info_by_dwarf_id)
-            .ok_or_else(|| Error::new(format!("Cannot find register info for dwarf id {dwarf_id}")))
-    };
-
-    let cfa = {
-        match row.cfa_rule {
-            CfaRule::RegisterAndOffset { register, offset } => current
-                .read_as::<u64>(rinfo(register)?)?
-                .wrapping_add_signed(offset),
-        }
-    };
-
-    unwond.write(RegisterId::rsp, RegisterValue::U64(cfa))?;
-
-    for (dwarf_id, rule) in &row.register_rules {
-        let reg = rinfo(*dwarf_id)?;
-        let value = {
-            match rule {
-                RegisterRule::Undefined => None,
-                RegisterRule::Register(r) => Some(current.read(rinfo(*r)?)?),
-                RegisterRule::SameValue => continue,
-                RegisterRule::Offset(o) => {
-                    Some(RegisterValue::U64(read(cfa.wrapping_add_signed(*o))?))
-                }
-                RegisterRule::ValOffset(o) => Some(RegisterValue::U64(cfa.wrapping_add_signed(*o))),
-            }
-        };
-        match value {
-            None => unwond.set_undefined(reg),
-            Some(val) => unwond.write(reg, val)?,
-        }
-    }
-
-    Ok(unwond)
 }
