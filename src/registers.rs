@@ -92,6 +92,7 @@ impl TryFrom<RegisterValue> for [u8; 16] {
 /// The cached `user` area of the inferior, stored as raw bytes so that padding
 /// never holds uninitialized memory. All access goes through the offsets in
 /// the register table.
+#[derive(Clone)]
 pub struct Registers {
     pub(crate) data: [u8; USER_SIZE],
     undefined_bits: BitArray<[u8; USER_SIZE.div_ceil(8)]>,
