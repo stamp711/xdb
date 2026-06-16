@@ -3,8 +3,9 @@ use super::abbrev::Abbrev;
 use super::attr::Attr;
 use super::constants::*;
 use super::cursor::Cursor;
+use super::line_table::FileEntry;
 use super::unit::CuId;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::types::FileAddr;
 
 /// A stable, copyable reference to a DIE by its position in `.debug_info`.
@@ -145,6 +146,34 @@ impl<'dw> DieRef<'dw> {
             }
         }
         None
+    }
+
+    pub fn file(&self) -> Result<&'dw FileEntry> {
+        let file_idx = if self.tag() == DW_TAG_inlined_subroutine {
+            self.attr(DW_AT_call_file)
+        } else {
+            self.attr(DW_AT_decl_file)
+        }
+        .ok_or_else(|| Error::new("DIE has no file attribute"))?
+        .as_int()?;
+        // In DWARF 5, the 0th file is the primary file of this CU, it's now explicit.
+        Ok(self
+            .dwarf
+            .line_table(self.cu)
+            .ok_or_else(|| Error::new("CU has no line table"))?
+            .file(file_idx))
+    }
+
+    pub fn line(&self) -> Result<u64> {
+        if self.tag() == DW_TAG_inlined_subroutine {
+            return self
+                .attr(DW_AT_call_line)
+                .ok_or_else(|| Error::new("DIE has no call line attribute"))?
+                .as_int();
+        }
+        self.attr(DW_AT_decl_line)
+            .ok_or_else(|| Error::new("DIE has no decl line attribute"))?
+            .as_int()
     }
 
     pub fn low_pc(&self) -> Result<FileAddr> {

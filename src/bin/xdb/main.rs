@@ -128,7 +128,12 @@ fn handle_stop(target: &Target, reason: StopReason) {
                 "Process {pid} stopped with signal {}",
                 signal_name(reason.info)
             );
-            if let Some(entry) = target.line_entry_at_pc()
+            if target.stack().inline_height() > 0 {
+                let die = target.dwarf().die(target.current_frame_of_inline_stack());
+                if let (Ok(file), Ok(line)) = (die.file(), die.line()) {
+                    print_source(&file.path, line, 3);
+                }
+            } else if let Some(entry) = target.line_entry_at_pc()
                 && let Some(file) = target.source_file_at_pc()
             {
                 print_source(&file, entry.line, 3);

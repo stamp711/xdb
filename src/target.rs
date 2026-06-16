@@ -361,6 +361,11 @@ impl Target {
         }
     }
 
+    pub fn current_frame_of_inline_stack(&self) -> DieHandle {
+        let inline_stack = self.inline_stack_at_pc();
+        inline_stack[inline_stack.len() - self.stack.inline_height()]
+    }
+
     /// Calculate and set the inline height to the max possible inline height on current pc.
     fn reset_inline_height(&mut self) -> Result<()> {
         if self.process.state() != ProcessState::Stopped {
