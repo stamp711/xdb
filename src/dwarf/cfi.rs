@@ -3,8 +3,6 @@
 //!
 //! Notes: <https://publish.obsidian.md/stamp711/01+Atomic/Exception+Frames>
 
-#![expect(dead_code)]
-
 use std::collections::HashMap;
 use std::ops::Range;
 

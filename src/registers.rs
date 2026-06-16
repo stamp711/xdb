@@ -3,6 +3,7 @@ use bitvec::array::BitArray;
 use crate::bit::{self, from_bytes};
 use crate::error::{Error, Result};
 use crate::register_info::{RegisterFormat, RegisterInfo};
+use crate::{RegisterId, VirtAddr};
 
 pub(crate) const USER_SIZE: usize = size_of::<libc::user>();
 pub(crate) const USER_REGS_OFFSET: usize = std::mem::offset_of!(libc::user, regs);
@@ -162,6 +163,12 @@ impl Registers {
         self.data[reg.offset..reg.offset + reg.size].copy_from_slice(&widened[..reg.size]);
         self.set_defined(reg);
         Ok(())
+    }
+}
+
+impl Registers {
+    pub fn get_pc(&self) -> VirtAddr {
+        VirtAddr(self.read_as(&RegisterId::rip).unwrap())
     }
 }
 
