@@ -3,7 +3,7 @@ use super::abbrev::Abbrev;
 use super::attr::Attr;
 use super::constants::*;
 use super::cursor::Cursor;
-use super::line_table::FileEntry;
+use super::line_table::{FileEntry, SourceLocation};
 use super::unit::CuId;
 use crate::error::{Error, Result};
 use crate::types::FileAddr;
@@ -146,6 +146,13 @@ impl<'dw> DieRef<'dw> {
             }
         }
         None
+    }
+
+    pub fn location(&self) -> Result<SourceLocation> {
+        Ok(SourceLocation {
+            file: self.file()?.clone(),
+            line: self.line()?,
+        })
     }
 
     pub fn file(&self) -> Result<&'dw FileEntry> {

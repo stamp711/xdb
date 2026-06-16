@@ -14,6 +14,12 @@ pub struct FileEntry {
     pub directory_index: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct SourceLocation {
+    pub file: FileEntry,
+    pub line: u64,
+}
+
 /// The decoded header of one compilation unit's line number program. Rows are
 /// produced on demand by running the program (`rows`).
 pub struct LineTable {
