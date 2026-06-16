@@ -47,8 +47,13 @@ pub fn print_help(args: &[&str]) {
             eprintln!("    catchpoint  - Commands for operating on catchpoints");
             eprintln!("    continue    - Resume the process");
             eprintln!("    disassemble - Disassemble instructions");
+            eprintln!("    finish      - Run until the current function returns");
+            eprintln!("    help        - Show available commands");
             eprintln!("    memory      - Commands for operating on memory");
+            eprintln!("    next        - Step over the next source line");
+            eprintln!("    quit        - Exit the debugger");
             eprintln!("    register    - Commands for operating on registers");
+            eprintln!("    step        - Step into the next source line");
             eprintln!("    stepi       - Step a single instruction");
             eprintln!("    watchpoint  - Commands for operating on watchpoints");
         }
