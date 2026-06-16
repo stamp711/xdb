@@ -30,6 +30,7 @@ pub struct Target {
     next_breakpoint_id: BreakpointId,
 }
 
+// -- construction & accessors --
 impl Target {
     pub fn launch(path: &Path, stdout_replacement: Option<BorrowedFd<'_>>) -> Result<Self> {
         let process = Process::launch(path, true, stdout_replacement)?;
@@ -80,9 +81,10 @@ impl Target {
     pub fn stack(&self) -> &Stack {
         &self.stack
     }
+}
 
-    // -- process control that keeps the inline stack in sync --
-
+// -- process control that keeps the inline stack in sync --
+impl Target {
     pub fn resume(&mut self) -> Result<()> {
         self.process.resume()
     }
@@ -104,9 +106,10 @@ impl Target {
         self.reset_inline_height()?;
         Ok(reason)
     }
+}
 
-    // -- address and source lookups --
-
+// -- address and source lookups --
+impl Target {
     pub fn get_pc_file_address(&self) -> Option<FileAddr> {
         self.elf.virt_addr_to_file(self.process.get_pc().ok()?)
     }
@@ -143,9 +146,10 @@ impl Target {
         }
         String::new()
     }
+}
 
-    // -- breakpoints --
-
+// -- breakpoints --
+impl Target {
     pub fn breakpoint(&self, id: BreakpointId) -> Result<&Breakpoint> {
         self.breakpoints
             .iter()
@@ -347,9 +351,10 @@ impl Target {
         }
         Ok(addresses)
     }
+}
 
-    // -- inline stack --
-
+// -- inline stack --
+impl Target {
     /// Get the inline stack at the current pc.
     ///
     /// Returns the DIEs of the inline stack at the current pc, with the outermost function (which
@@ -393,9 +398,10 @@ impl Target {
 
         Ok(())
     }
+}
 
-    // -- source-level stepping --
-
+// -- source-level stepping --
+impl Target {
     pub fn step_in(&mut self) -> Result<StopReason> {
         // Simulate step if we are currently in an inlined function
         if self.stack.inline_height() > 0 {
