@@ -5,13 +5,16 @@
 
 #![expect(dead_code)]
 
+use std::collections::HashMap;
 use std::ops::Range;
 
 use super::Dwarf;
 use super::constants::*;
 use super::cursor::Cursor;
 use crate::error::{Error, Result};
+use crate::register_info::register_info_by_dwarf_id;
 use crate::types::FileAddr;
+use crate::{RegisterId, RegisterInfo, RegisterValue, Registers};
 
 pub struct CallFrameInformation {
     eh_hdr: EhHdr,
@@ -315,392 +318,373 @@ fn parse_fde(eh_frame: &[u8], offset: usize, bases: &BaseAddresses) -> Result<Fd
     })
 }
 
-mod unwind {
-    use std::{collections::HashMap, ops::Range};
+/// How to unwind the canonical frame address.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CfaRule {
+    /// The CFA is calculated by register R's value + offset N
+    RegisterAndOffset { register: u64, offset: i64 },
+    // /// The CFA is calculated by executing the DWARF expression E
+    // Expression(E),
+}
 
-    use super::{BaseAddresses, CallFrameInformation, Cie, Fde};
-    use crate::{
-        Dwarf, Error, FileAddr, RegisterId, RegisterInfo, RegisterValue, Registers, Result,
-        dwarf::{constants::*, cursor::Cursor},
-        register_info::register_info_by_dwarf_id,
-    };
+/// How to recover one register's caller value.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum RegisterRule {
+    /// Not possible to restore
+    Undefined,
+    /// Stored in another register
+    Register(u64),
+    /// Same register
+    SameValue,
+    /// Stored in offset N from current CFA
+    Offset(i64),
+    /// Value is CFA + N
+    ValOffset(i64),
+    // /// Located at the address produced by executing DWARF expression E
+    // Expression(E),
+    // /// Value is produced by executing DWARF expression E.
+    // ValExpression(E),
+}
 
-    /// How to unwind the canonical frame address.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum CfaRule {
-        /// The CFA is calculated by register R's value + offset N
-        RegisterAndOffset { register: u64, offset: i64 },
-        // /// The CFA is calculated by executing the DWARF expression E
-        // Expression(E),
-    }
+pub(crate) type RegisterRules = HashMap<u64, RegisterRule>;
 
-    /// How to recover one register's caller value.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub enum RegisterRule {
-        /// Not possible to restore
-        Undefined,
-        /// Stored in another register
-        Register(u64),
-        /// Same register
-        SameValue,
-        /// Stored in offset N from current CFA
-        Offset(i64),
-        /// Value is CFA + N
-        ValOffset(i64),
-        // /// Located at the address produced by executing DWARF expression E
-        // Expression(E),
-        // /// Value is produced by executing DWARF expression E.
-        // ValExpression(E),
-    }
+struct UnwindContext {
+    location: u64,
+    bases: BaseAddresses,
+    cfa_rule: Option<CfaRule>,
+    register_rules: RegisterRules,
+    cie_register_rules: RegisterRules,
+    stack: Vec<(Option<CfaRule>, RegisterRules)>,
+}
 
-    type RegisterRules = HashMap<u64, RegisterRule>;
-
-    struct UnwindContext {
-        location: u64,
-        bases: BaseAddresses,
-        cfa_rule: Option<CfaRule>,
-        register_rules: RegisterRules,
-        cie_register_rules: RegisterRules,
-        stack: Vec<(Option<CfaRule>, RegisterRules)>,
-    }
-
-    impl UnwindContext {
-        fn new(initial_location: u64, bases: BaseAddresses) -> Self {
-            Self {
-                location: initial_location,
-                bases,
-                cfa_rule: None,
-                register_rules: HashMap::new(),
-                cie_register_rules: HashMap::new(),
-                stack: Vec::new(),
-            }
-        }
-
-        fn run_cie(&mut self, eh_frame: &[u8], cie: &Cie) -> Result<()> {
-            self.run(eh_frame, cie.instructions.clone(), None, cie)?;
-            self.cie_register_rules = self.register_rules.clone();
-            Ok(())
-        }
-
-        fn run_fde(&mut self, eh_frame: &[u8], fde: &Fde, target: Option<u64>) -> Result<()> {
-            if self.location != fde.initial_location.addr() {
-                panic!("FDE initial location does not match current location");
-            }
-            self.run(eh_frame, fde.instructions.clone(), target, &fde.cie)?;
-            Ok(())
-        }
-
-        /// Move to a new (always-greater) absolute location. Returns true if `target`
-        /// is reached, per DWARF5.pdf P.181 6.4.3 terminal logic.
-        fn advance_location(&mut self, loc: u64, target: Option<u64>) -> Result<bool> {
-            if loc < self.location {
-                return Err(Error::new(format!(
-                    "CFI location moved backwards: {loc:#x} < {:#x}",
-                    self.location
-                )));
-            }
-            self.location = loc;
-            Ok(matches!(target, Some(t) if loc > t))
-        }
-
-        /// Run the instructions, modifying the unwind context.
-        /// If `target` is Some, only run up to the point where next instruction would make `location` > `target`.
-        fn run(
-            &mut self,
-            eh_frame: &[u8],
-            instructions: Range<usize>,
-            target: Option<u64>,
-            cie: &Cie,
-        ) -> Result<()> {
-            let mut cursor = Cursor::at(eh_frame, instructions.start);
-
-            while cursor.position() < instructions.end {
-                // Ref: DWARF5.pdf, P.239
-                // CFIs are encoded in one or more bytes, grab the first one.
-                let op = cursor.u8();
-                let _hi2 = op & 0xc0;
-                let lo6 = op & 0x3f;
-
-                // hi2 + lo6 opcodes
-                match op as u64 {
-                    // ========== 6.4.2.1 Row Creation Instructions ==========
-
-                    // Create a new table row using the specified address as the location.
-                    // The new location is always greater than the current one.
-                    DW_CFA_set_loc => {
-                        let position_address = self.bases.eh_frame + cursor.position() as u64;
-                        // Note: we only support segment_size == 0, so no segment selector here.
-                        let loc = super::decode_pointer(
-                            &mut cursor,
-                            cie.fde_pointer_encoding,
-                            position_address,
-                            &self.bases,
-                        )?;
-                        if self.advance_location(loc, target)? {
-                            break;
-                        }
-                    }
-
-                    // hi2 = 0x1
-                    DW_CFA_advance_loc..DW_CFA_offset => {
-                        let delta = lo6 as u64;
-                        let inc = delta * cie.code_alignment_factor;
-                        if self.advance_location(self.location + inc, target)? {
-                            break;
-                        }
-                    }
-
-                    DW_CFA_advance_loc1 | DW_CFA_advance_loc2 | DW_CFA_advance_loc4 => {
-                        let inc = match op as u64 {
-                            DW_CFA_advance_loc1 => u64::from(cursor.u8()),
-                            DW_CFA_advance_loc2 => u64::from(cursor.u16()),
-                            DW_CFA_advance_loc4 => cursor.u32() as u64,
-                            _ => unreachable!(),
-                        } * cie.code_alignment_factor;
-                        if self.advance_location(self.location + inc, target)? {
-                            break;
-                        }
-                    }
-
-                    // ========== 6.4.2.2 CFA Definition Instructions ==========
-                    DW_CFA_def_cfa => {
-                        self.cfa_rule = Some(CfaRule::RegisterAndOffset {
-                            register: cursor.uleb128(),
-                            offset: cursor.uleb128() as i64, // (unsigned non-factored)
-                        });
-                    }
-
-                    DW_CFA_def_cfa_sf => {
-                        self.cfa_rule = Some(CfaRule::RegisterAndOffset {
-                            register: cursor.uleb128(),
-                            offset: cursor.sleb128() * cie.data_alignment_factor,
-                        });
-                    }
-
-                    DW_CFA_def_cfa_register => match &mut self.cfa_rule {
-                        Some(CfaRule::RegisterAndOffset { register: reg, .. }) => {
-                            *reg = cursor.uleb128();
-                        }
-                        _ => {
-                            // DWARF5.pdf, P.178
-                            return Err(Error::new(
-                                "def_cfa_register requires current CFA rule to be RegisterAndOffset",
-                            ));
-                        }
-                    },
-
-                    DW_CFA_def_cfa_offset => match &mut self.cfa_rule {
-                        Some(CfaRule::RegisterAndOffset { offset, .. }) => {
-                            *offset = cursor.uleb128() as i64; // (unsigned non-factored)
-                        }
-                        _ => {
-                            return Err(Error::new(
-                                "def_cfa_offset requires current CFA rule to be RegisterAndOffset",
-                            ));
-                        }
-                    },
-
-                    DW_CFA_def_cfa_offset_sf => match &mut self.cfa_rule {
-                        Some(CfaRule::RegisterAndOffset { offset, .. }) => {
-                            *offset = cursor.sleb128() * cie.data_alignment_factor;
-                        }
-                        _ => {
-                            return Err(Error::new(
-                                "def_cfa_offset_sf requires current CFA rule to be RegisterAndOffset",
-                            ));
-                        }
-                    },
-
-                    DW_CFA_def_cfa_expression => unimplemented!(),
-
-                    // ========== 6.4.2.3 Register Rule Instructions ==========
-                    DW_CFA_undefined => {
-                        self.register_rules
-                            .insert(cursor.uleb128(), RegisterRule::Undefined);
-                    }
-
-                    DW_CFA_same_value => {
-                        self.register_rules
-                            .insert(cursor.uleb128(), RegisterRule::SameValue);
-                    }
-
-                    // hi2 = 0x2
-                    // Set register rule to Offset(N)
-                    DW_CFA_offset..DW_CFA_restore => {
-                        self.register_rules.insert(
-                            lo6 as u64,
-                            RegisterRule::Offset(
-                                cursor.uleb128() as i64 * cie.data_alignment_factor,
-                            ),
-                        );
-                    }
-
-                    DW_CFA_offset_extended => {
-                        self.register_rules.insert(
-                            cursor.uleb128(),
-                            RegisterRule::Offset(
-                                cursor.uleb128() as i64 * cie.data_alignment_factor,
-                            ),
-                        );
-                    }
-
-                    DW_CFA_offset_extended_sf => {
-                        self.register_rules.insert(
-                            cursor.uleb128(),
-                            RegisterRule::Offset(cursor.sleb128() * cie.data_alignment_factor),
-                        );
-                    }
-
-                    DW_CFA_val_offset => {
-                        self.register_rules.insert(
-                            cursor.uleb128(),
-                            RegisterRule::ValOffset(
-                                cursor.uleb128() as i64 * cie.data_alignment_factor,
-                            ),
-                        );
-                    }
-
-                    DW_CFA_val_offset_sf => {
-                        self.register_rules.insert(
-                            cursor.uleb128(),
-                            RegisterRule::ValOffset(cursor.sleb128() * cie.data_alignment_factor),
-                        );
-                    }
-
-                    DW_CFA_register => {
-                        self.register_rules
-                            .insert(cursor.uleb128(), RegisterRule::Register(cursor.uleb128()));
-                    }
-
-                    DW_CFA_expression => unimplemented!(),
-
-                    DW_CFA_val_expression => unimplemented!(),
-
-                    // hi2 = 0x3
-                    // Restore register rule to from CIE
-                    DW_CFA_restore.. => {
-                        let register = lo6 as u64;
-                        match self.cie_register_rules.get(&register) {
-                            None => self.register_rules.remove(&register),
-                            Some(rule) => self.register_rules.insert(register, *rule),
-                        };
-                    }
-
-                    DW_CFA_restore_extended => {
-                        let register = cursor.uleb128();
-                        match self.cie_register_rules.get(&register) {
-                            None => self.register_rules.remove(&register),
-                            Some(rule) => self.register_rules.insert(register, *rule),
-                        };
-                    }
-
-                    // ========== 6.4.2.4 Row State Instructions ==========
-                    DW_CFA_remember_state => {
-                        self.stack
-                            .push((self.cfa_rule, self.register_rules.clone()));
-                    }
-
-                    DW_CFA_restore_state => {
-                        (self.cfa_rule, self.register_rules) = self
-                            .stack
-                            .pop()
-                            .ok_or_else(|| Error::new("CFA stack underflow at restore_state"))?;
-                    }
-
-                    // ========== 6.4.2.5 Padding Instruction ==========
-                    DW_CFA_nop => {}
-
-                    DW_CFA_low_user..=DW_CFA_high_user => {
-                        return Err(Error::new(format!(
-                            "Encountered vendor specific CFI opcode: {op:#x}"
-                        )));
-                    }
-
-                    other => return Err(Error::new(format!("Unsupported CFI opcode: {other:#x}"))),
-                };
-            }
-
-            Ok(())
+impl UnwindContext {
+    fn new(initial_location: u64, bases: BaseAddresses) -> Self {
+        Self {
+            location: initial_location,
+            bases,
+            cfa_rule: None,
+            register_rules: HashMap::new(),
+            cie_register_rules: HashMap::new(),
+            stack: Vec::new(),
         }
     }
 
-    struct UnwindRow {
-        cfa_rule: CfaRule,
-        register_rules: RegisterRules,
+    fn run_cie(&mut self, eh_frame: &[u8], cie: &Cie) -> Result<()> {
+        self.run(eh_frame, cie.instructions.clone(), None, cie)?;
+        self.cie_register_rules = self.register_rules.clone();
+        Ok(())
     }
 
-    impl CallFrameInformation {
-        fn unwind_row_for_addr(&self, dwarf: &Dwarf, pc: FileAddr) -> Result<UnwindRow> {
-            let fde = self.fde_for_addr(dwarf, pc)?;
-
-            if pc < fde.initial_location
-                || pc >= FileAddr(fde.initial_location.addr() + fde.address_range)
-            {
-                return Err(Error::new("No unwind information at PC"));
-            }
-
-            let eh_frame = dwarf.section(".eh_frame");
-
-            let mut ctx = UnwindContext::new(fde.initial_location.addr(), self.bases);
-            ctx.run_cie(eh_frame, &fde.cie)?;
-            ctx.run_fde(eh_frame, &fde, Some(pc.addr()))?;
-
-            Ok(UnwindRow {
-                cfa_rule: ctx
-                    .cfa_rule
-                    .ok_or_else(|| Error::new("CFA rule not defined at PC"))?,
-                register_rules: ctx.register_rules,
-            })
+    fn run_fde(&mut self, eh_frame: &[u8], fde: &Fde, target: Option<u64>) -> Result<()> {
+        if self.location != fde.initial_location.addr() {
+            panic!("FDE initial location does not match current location");
         }
+        self.run(eh_frame, fde.instructions.clone(), target, &fde.cie)?;
+        Ok(())
     }
 
-    fn unwind_registers(
-        current: &Registers,
-        row: &UnwindRow,
-        read: impl Fn(u64) -> Result<u64>,
-    ) -> Result<Registers> {
-        let mut unwond = current.clone();
+    /// Move to a new (always-greater) absolute location. Returns true if `target`
+    /// is reached, per DWARF5.pdf P.181 6.4.3 terminal logic.
+    fn advance_location(&mut self, loc: u64, target: Option<u64>) -> Result<bool> {
+        if loc < self.location {
+            return Err(Error::new(format!(
+                "CFI location moved backwards: {loc:#x} < {:#x}",
+                self.location
+            )));
+        }
+        self.location = loc;
+        Ok(matches!(target, Some(t) if loc > t))
+    }
 
-        let rinfo = |dwarf_id: u64| -> Result<&'static RegisterInfo> {
-            i32::try_from(dwarf_id)
-                .ok()
-                .and_then(register_info_by_dwarf_id)
-                .ok_or_else(|| {
-                    Error::new(format!("Cannot find register info for dwarf id {dwarf_id}"))
-                })
-        };
+    /// Run the instructions, modifying the unwind context.
+    /// If `target` is Some, only run up to the point where next instruction would make `location` > `target`.
+    fn run(
+        &mut self,
+        eh_frame: &[u8],
+        instructions: Range<usize>,
+        target: Option<u64>,
+        cie: &Cie,
+    ) -> Result<()> {
+        let mut cursor = Cursor::at(eh_frame, instructions.start);
 
-        let cfa = {
-            match row.cfa_rule {
-                CfaRule::RegisterAndOffset { register, offset } => current
-                    .read_as::<u64>(rinfo(register)?)?
-                    .wrapping_add_signed(offset),
-            }
-        };
+        while cursor.position() < instructions.end {
+            // Ref: DWARF5.pdf, P.239
+            // CFIs are encoded in one or more bytes, grab the first one.
+            let op = cursor.u8();
+            let _hi2 = op & 0xc0;
+            let lo6 = op & 0x3f;
 
-        unwond.write(RegisterId::rsp, RegisterValue::U64(cfa))?;
+            // hi2 + lo6 opcodes
+            match op as u64 {
+                // ========== 6.4.2.1 Row Creation Instructions ==========
 
-        for (dwarf_id, rule) in &row.register_rules {
-            let reg = rinfo(*dwarf_id)?;
-            let value = {
-                match rule {
-                    RegisterRule::Undefined => None,
-                    RegisterRule::Register(r) => Some(current.read(rinfo(*r)?)?),
-                    RegisterRule::SameValue => continue,
-                    RegisterRule::Offset(o) => {
-                        Some(RegisterValue::U64(read(cfa.wrapping_add_signed(*o))?))
-                    }
-                    RegisterRule::ValOffset(o) => {
-                        Some(RegisterValue::U64(cfa.wrapping_add_signed(*o)))
+                // Create a new table row using the specified address as the location.
+                // The new location is always greater than the current one.
+                DW_CFA_set_loc => {
+                    let position_address = self.bases.eh_frame + cursor.position() as u64;
+                    // Note: we only support segment_size == 0, so no segment selector here.
+                    let loc = decode_pointer(
+                        &mut cursor,
+                        cie.fde_pointer_encoding,
+                        position_address,
+                        &self.bases,
+                    )?;
+                    if self.advance_location(loc, target)? {
+                        break;
                     }
                 }
+
+                // hi2 = 0x1
+                DW_CFA_advance_loc..DW_CFA_offset => {
+                    let delta = lo6 as u64;
+                    let inc = delta * cie.code_alignment_factor;
+                    if self.advance_location(self.location + inc, target)? {
+                        break;
+                    }
+                }
+
+                DW_CFA_advance_loc1 | DW_CFA_advance_loc2 | DW_CFA_advance_loc4 => {
+                    let inc = match op as u64 {
+                        DW_CFA_advance_loc1 => u64::from(cursor.u8()),
+                        DW_CFA_advance_loc2 => u64::from(cursor.u16()),
+                        DW_CFA_advance_loc4 => cursor.u32() as u64,
+                        _ => unreachable!(),
+                    } * cie.code_alignment_factor;
+                    if self.advance_location(self.location + inc, target)? {
+                        break;
+                    }
+                }
+
+                // ========== 6.4.2.2 CFA Definition Instructions ==========
+                DW_CFA_def_cfa => {
+                    self.cfa_rule = Some(CfaRule::RegisterAndOffset {
+                        register: cursor.uleb128(),
+                        offset: cursor.uleb128() as i64, // (unsigned non-factored)
+                    });
+                }
+
+                DW_CFA_def_cfa_sf => {
+                    self.cfa_rule = Some(CfaRule::RegisterAndOffset {
+                        register: cursor.uleb128(),
+                        offset: cursor.sleb128() * cie.data_alignment_factor,
+                    });
+                }
+
+                DW_CFA_def_cfa_register => match &mut self.cfa_rule {
+                    Some(CfaRule::RegisterAndOffset { register: reg, .. }) => {
+                        *reg = cursor.uleb128();
+                    }
+                    _ => {
+                        // DWARF5.pdf, P.178
+                        return Err(Error::new(
+                            "def_cfa_register requires current CFA rule to be RegisterAndOffset",
+                        ));
+                    }
+                },
+
+                DW_CFA_def_cfa_offset => match &mut self.cfa_rule {
+                    Some(CfaRule::RegisterAndOffset { offset, .. }) => {
+                        *offset = cursor.uleb128() as i64; // (unsigned non-factored)
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            "def_cfa_offset requires current CFA rule to be RegisterAndOffset",
+                        ));
+                    }
+                },
+
+                DW_CFA_def_cfa_offset_sf => match &mut self.cfa_rule {
+                    Some(CfaRule::RegisterAndOffset { offset, .. }) => {
+                        *offset = cursor.sleb128() * cie.data_alignment_factor;
+                    }
+                    _ => {
+                        return Err(Error::new(
+                            "def_cfa_offset_sf requires current CFA rule to be RegisterAndOffset",
+                        ));
+                    }
+                },
+
+                DW_CFA_def_cfa_expression => unimplemented!(),
+
+                // ========== 6.4.2.3 Register Rule Instructions ==========
+                DW_CFA_undefined => {
+                    self.register_rules
+                        .insert(cursor.uleb128(), RegisterRule::Undefined);
+                }
+
+                DW_CFA_same_value => {
+                    self.register_rules
+                        .insert(cursor.uleb128(), RegisterRule::SameValue);
+                }
+
+                // hi2 = 0x2
+                // Set register rule to Offset(N)
+                DW_CFA_offset..DW_CFA_restore => {
+                    self.register_rules.insert(
+                        lo6 as u64,
+                        RegisterRule::Offset(cursor.uleb128() as i64 * cie.data_alignment_factor),
+                    );
+                }
+
+                DW_CFA_offset_extended => {
+                    self.register_rules.insert(
+                        cursor.uleb128(),
+                        RegisterRule::Offset(cursor.uleb128() as i64 * cie.data_alignment_factor),
+                    );
+                }
+
+                DW_CFA_offset_extended_sf => {
+                    self.register_rules.insert(
+                        cursor.uleb128(),
+                        RegisterRule::Offset(cursor.sleb128() * cie.data_alignment_factor),
+                    );
+                }
+
+                DW_CFA_val_offset => {
+                    self.register_rules.insert(
+                        cursor.uleb128(),
+                        RegisterRule::ValOffset(
+                            cursor.uleb128() as i64 * cie.data_alignment_factor,
+                        ),
+                    );
+                }
+
+                DW_CFA_val_offset_sf => {
+                    self.register_rules.insert(
+                        cursor.uleb128(),
+                        RegisterRule::ValOffset(cursor.sleb128() * cie.data_alignment_factor),
+                    );
+                }
+
+                DW_CFA_register => {
+                    self.register_rules
+                        .insert(cursor.uleb128(), RegisterRule::Register(cursor.uleb128()));
+                }
+
+                DW_CFA_expression => unimplemented!(),
+
+                DW_CFA_val_expression => unimplemented!(),
+
+                // hi2 = 0x3
+                // Restore register rule to from CIE
+                DW_CFA_restore.. => {
+                    let register = lo6 as u64;
+                    match self.cie_register_rules.get(&register) {
+                        None => self.register_rules.remove(&register),
+                        Some(rule) => self.register_rules.insert(register, *rule),
+                    };
+                }
+
+                DW_CFA_restore_extended => {
+                    let register = cursor.uleb128();
+                    match self.cie_register_rules.get(&register) {
+                        None => self.register_rules.remove(&register),
+                        Some(rule) => self.register_rules.insert(register, *rule),
+                    };
+                }
+
+                // ========== 6.4.2.4 Row State Instructions ==========
+                DW_CFA_remember_state => {
+                    self.stack
+                        .push((self.cfa_rule, self.register_rules.clone()));
+                }
+
+                DW_CFA_restore_state => {
+                    (self.cfa_rule, self.register_rules) = self
+                        .stack
+                        .pop()
+                        .ok_or_else(|| Error::new("CFA stack underflow at restore_state"))?;
+                }
+
+                // ========== 6.4.2.5 Padding Instruction ==========
+                DW_CFA_nop => {}
+
+                DW_CFA_low_user..=DW_CFA_high_user => {
+                    return Err(Error::new(format!(
+                        "Encountered vendor specific CFI opcode: {op:#x}"
+                    )));
+                }
+
+                other => return Err(Error::new(format!("Unsupported CFI opcode: {other:#x}"))),
             };
-            match value {
-                None => unwond.set_undefined(reg),
-                Some(val) => unwond.write(reg, val)?,
-            }
         }
 
-        Ok(unwond)
+        Ok(())
     }
+}
+
+pub(crate) struct UnwindRow {
+    pub(crate) cfa_rule: CfaRule,
+    pub(crate) register_rules: RegisterRules,
+}
+
+impl CallFrameInformation {
+    pub(crate) fn unwind_row_for_addr(&self, dwarf: &Dwarf, pc: FileAddr) -> Result<UnwindRow> {
+        let fde = self.fde_for_addr(dwarf, pc)?;
+
+        if pc < fde.initial_location
+            || pc >= FileAddr(fde.initial_location.addr() + fde.address_range)
+        {
+            return Err(Error::new("No unwind information at PC"));
+        }
+
+        let eh_frame = dwarf.section(".eh_frame");
+
+        let mut ctx = UnwindContext::new(fde.initial_location.addr(), self.bases);
+        ctx.run_cie(eh_frame, &fde.cie)?;
+        ctx.run_fde(eh_frame, &fde, Some(pc.addr()))?;
+
+        Ok(UnwindRow {
+            cfa_rule: ctx
+                .cfa_rule
+                .ok_or_else(|| Error::new("CFA rule not defined at PC"))?,
+            register_rules: ctx.register_rules,
+        })
+    }
+}
+
+fn unwind_registers(
+    current: &Registers,
+    row: &UnwindRow,
+    read: impl Fn(u64) -> Result<u64>,
+) -> Result<Registers> {
+    let mut unwond = current.clone();
+
+    let rinfo = |dwarf_id: u64| -> Result<&'static RegisterInfo> {
+        i32::try_from(dwarf_id)
+            .ok()
+            .and_then(register_info_by_dwarf_id)
+            .ok_or_else(|| Error::new(format!("Cannot find register info for dwarf id {dwarf_id}")))
+    };
+
+    let cfa = {
+        match row.cfa_rule {
+            CfaRule::RegisterAndOffset { register, offset } => current
+                .read_as::<u64>(rinfo(register)?)?
+                .wrapping_add_signed(offset),
+        }
+    };
+
+    unwond.write(RegisterId::rsp, RegisterValue::U64(cfa))?;
+
+    for (dwarf_id, rule) in &row.register_rules {
+        let reg = rinfo(*dwarf_id)?;
+        let value = {
+            match rule {
+                RegisterRule::Undefined => None,
+                RegisterRule::Register(r) => Some(current.read(rinfo(*r)?)?),
+                RegisterRule::SameValue => continue,
+                RegisterRule::Offset(o) => {
+                    Some(RegisterValue::U64(read(cfa.wrapping_add_signed(*o))?))
+                }
+                RegisterRule::ValOffset(o) => Some(RegisterValue::U64(cfa.wrapping_add_signed(*o))),
+            }
+        };
+        match value {
+            None => unwond.set_undefined(reg),
+            Some(val) => unwond.write(reg, val)?,
+        }
+    }
+
+    Ok(unwond)
 }
