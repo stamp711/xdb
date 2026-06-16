@@ -210,19 +210,18 @@ fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
         pc.addr()
     );
 
-    let func_name = target.function_name_at_address(pc);
-    if !func_name.is_empty() {
-        message += &format!(" in {func_name} ()");
+    let location = target.current_location();
+    if let Some(func) = location.function.filter(|f| !f.is_empty()) {
+        message += &format!(" in {func} ()");
     }
-
-    if let Some(entry) = target.line_entry_at_pc()
-        && let Some(file) = target.source_file_at_pc()
-    {
-        let file = file
+    if let Some(source) = location.source {
+        let file = source
+            .file
+            .path
             .file_name()
             .map(|f| f.to_string_lossy().into_owned())
             .unwrap_or_default();
-        message += &format!(" at {file}:{}", entry.line);
+        message += &format!(" at {file}:{}", source.line);
     }
 
     if reason.info == Signal::SIGTRAP as u8 {
@@ -254,15 +253,8 @@ fn print_stop_reason(target: &Target, reason: &StopReason) {
 fn handle_stop(target: &Target, reason: StopReason) {
     print_stop_reason(target, &reason);
     if reason.state == ProcessState::Stopped {
-        if target.stack().inline_height() > 0 {
-            let die = target.dwarf().die(target.current_frame_of_inline_stack());
-            if let (Ok(file), Ok(line)) = (die.file(), die.line()) {
-                print_source(&file.path, line, 3);
-            }
-        } else if let Some(entry) = target.line_entry_at_pc()
-            && let Some(file) = target.source_file_at_pc()
-        {
-            print_source(&file, entry.line, 3);
+        if let Some(source) = target.current_location().source {
+            print_source(&source.file.path, source.line, 3);
         } else {
             let process = target.process();
             let _ = commands::disassemble::print_disassembly(process, process.get_pc().ok(), 5);

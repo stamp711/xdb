@@ -8,6 +8,7 @@ use crate::disassembler::Disassembler;
 use crate::dwarf::Dwarf;
 use crate::dwarf::constants::{DW_AT_low_pc, DW_AT_ranges, DW_TAG_inlined_subroutine};
 use crate::dwarf::die::DieHandle;
+use crate::dwarf::line_table::SourceLocation;
 use crate::elf::Elf;
 use crate::error::{Error, Result};
 use crate::process::{Process, ProcessState, StopReason};
@@ -28,6 +29,14 @@ pub struct Target {
     stack: Stack,
     breakpoints: Vec<Breakpoint>,
     next_breakpoint_id: BreakpointId,
+}
+
+/// The function name and source position of the frame currently in focus: the
+/// inlined frame if execution is virtually inside one, otherwise the physical
+/// frame at the program counter.
+pub struct CurrentLocation {
+    pub function: Option<String>,
+    pub source: Option<SourceLocation>,
 }
 
 // -- construction & accessors --
@@ -145,6 +154,48 @@ impl Target {
             return self.elf.get_string(sym.st_name as usize).to_owned();
         }
         String::new()
+    }
+
+    /// Resolve the current frame's function name and source position, hiding the
+    /// inline-vs-physical distinction (see [`CurrentLocation`]).
+    pub fn current_location(&self) -> CurrentLocation {
+        let inline = self.inline_stack_at_pc();
+        if inline.is_empty() {
+            // No DWARF frame here: name from the ELF symbol table, source from the line table.
+            return CurrentLocation {
+                function: self
+                    .process
+                    .get_pc()
+                    .ok()
+                    .map(|pc| self.function_name_at_address(pc)),
+                source: self.source_at_pc(),
+            };
+        }
+        // The focused frame's name comes from its own DIE. Its source line lives on its
+        // inlined callee's `DW_AT_call_*` (one frame inward); the innermost frame has no
+        // inlined callee, so fall back to the line table, which maps the pc to that same
+        // innermost body line.
+        let i = self.stack.current_inline_index();
+        CurrentLocation {
+            function: inline
+                .get(i)
+                .and_then(|h| self.dwarf.die(*h).name().map(str::to_owned)),
+            source: inline
+                .get(i + 1)
+                .and_then(|h| self.dwarf.die(*h).location().ok())
+                .or_else(|| self.source_at_pc()),
+        }
+    }
+
+    fn source_at_pc(&self) -> Option<SourceLocation> {
+        let fpc = self.get_pc_file_address()?;
+        let cu = self.dwarf.unit_containing_address(fpc)?;
+        let table = self.dwarf.line_table(cu)?;
+        let entry = table.entry_at_address(&self.dwarf, fpc)?;
+        Some(SourceLocation {
+            file: table.file(entry.file_index).clone(),
+            line: entry.line,
+        })
     }
 }
 
@@ -364,11 +415,6 @@ impl Target {
             Some(fpc) => self.dwarf.inline_stack_at_address(fpc),
             None => Vec::new(),
         }
-    }
-
-    pub fn current_frame_of_inline_stack(&self) -> DieHandle {
-        let inline_stack = self.inline_stack_at_pc();
-        inline_stack[inline_stack.len() - self.stack.inline_height()]
     }
 
     /// Calculate and set the inline height to the max possible inline height on current pc.
