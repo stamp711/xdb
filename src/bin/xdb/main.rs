@@ -1,5 +1,6 @@
 mod commands;
 
+use std::borrow::Cow;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicI32, Ordering};
@@ -9,8 +10,8 @@ use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use xdb::syscalls::syscall_id_to_name;
 use xdb::{
-    Error, HardwareStop, Pid, Process, ProcessState, StopReason, Stoppoint, SyscallInformation,
-    Target, TrapType,
+    Error, HardwareStop, Pid, Process, ProcessState, StopReason, SyscallInformation, Target,
+    TrapType,
 };
 
 static INFERIOR_PID: AtomicI32 = AtomicI32::new(0);
@@ -150,53 +151,39 @@ fn print_syscall_details(syscall: &SyscallInformation) {
     }
 }
 
-fn get_sigtrap_info(process: &Process, reason: &StopReason) -> String {
-    let mut message = String::new();
+fn get_sigtrap_desc(process: &Process, reason: &StopReason) -> Option<Cow<'static, str>> {
+    let trap = reason.trap.as_ref()?;
 
-    let Some(trap) = reason.trap else {
-        return message;
-    };
     match trap {
-        TrapType::SoftwareBreakpoint => {
-            if let Ok(pc) = process.get_pc()
-                && let Ok(bp) = process.breakpoint_sites().get_by_address(pc)
-            {
-                message = format!(" (breakpoint {})", bp.id());
-            }
+        TrapType::SingleStep => Some(" (single step)".into()),
+
+        TrapType::SoftwareBreakpoint(Some(site_id)) => {
+            Some(format!(" (breakpoint {})", site_id).into())
         }
-        TrapType::SingleStep => {
-            message = " (single step)".to_string();
+
+        TrapType::HardwareStoppoint(Some(HardwareStop::Breakpoint(id))) => {
+            Some(format!(" (breakpoint {id})").into())
         }
-        TrapType::HardwareStoppoint => match process.get_current_hardware_stoppoint() {
-            // Hardware breakpoint
-            Ok(HardwareStop::Breakpoint(id)) => {
-                message = format!(" (breakpoint {id})");
-            }
-            // Hardware watchpoint
-            Ok(HardwareStop::Watchpoint(watchpoint_id)) => {
-                message = format!(" (watchpoint {watchpoint_id})");
-                if let Ok(wp) = process.watchpoints().get_by_id(watchpoint_id) {
-                    if wp.data() == wp.previous_data() {
-                        message += &format!("\n Value: {:#x}", wp.data());
-                    } else {
-                        message += &format!("\n Previous Value: {:#x}", wp.previous_data());
-                        message += &format!("\n Current Value: {:#x}", wp.data());
-                    }
+
+        TrapType::HardwareStoppoint(Some(HardwareStop::Watchpoint(id))) => {
+            let mut message = format!(" (watchpoint {id})");
+            if let Ok(wp) = process.watchpoints().get_by_id(*id) {
+                if wp.data() == wp.previous_data() {
+                    message += &format!("\n Value: {:#x}", wp.data());
+                } else {
+                    message += &format!("\n Previous Value: {:#x}", wp.previous_data());
+                    message += &format!("\n Current Value: {:#x}", wp.data());
                 }
             }
-            Err(_) => {}
-        },
-        TrapType::Syscall => {
-            if let Some(syscall) = reason.syscall {
-                message = format_syscall_trap_info(&syscall);
-            } else {
-                message = " (syscall)".to_string();
-            }
+            Some(message.into())
         }
-        TrapType::Unknown => {}
-    }
 
-    message
+        TrapType::Syscall(syscall_info) => Some(format_syscall_trap_info(syscall_info).into()),
+
+        TrapType::Unknown
+        | TrapType::SoftwareBreakpoint(None)
+        | TrapType::HardwareStoppoint(None) => None,
+    }
 }
 
 fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
@@ -224,8 +211,10 @@ fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
         message += &format!(" at {file}:{}", source.line);
     }
 
-    if reason.info == Signal::SIGTRAP as u8 {
-        message += &get_sigtrap_info(process, reason);
+    if reason.info == Signal::SIGTRAP as u8
+        && let Some(desc) = get_sigtrap_desc(process, reason)
+    {
+        message += &desc;
     }
 
     message
@@ -243,10 +232,9 @@ fn print_stop_reason(target: &Target, reason: &StopReason) {
     // Print additional syscall details if this is a syscall trap
     if reason.state == ProcessState::Stopped
         && reason.info == Signal::SIGTRAP as u8
-        && reason.trap == Some(TrapType::Syscall)
-        && let Some(syscall) = reason.syscall
+        && let Some(TrapType::Syscall(syscall_info)) = reason.trap
     {
-        print_syscall_details(&syscall);
+        print_syscall_details(&syscall_info);
     }
 }
 

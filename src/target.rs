@@ -46,7 +46,7 @@ impl Target {
         let elf = load_elf(&process, path)?;
         let dwarf = Dwarf::new(&elf)?;
         let mut target = Self::new(process, elf, dwarf);
-        target.reset_inline_height()?;
+        target.notify_stop()?;
         Ok(target)
     }
 
@@ -56,7 +56,7 @@ impl Target {
         let elf = load_elf(&process, &exe)?;
         let dwarf = Dwarf::new(&elf)?;
         let mut target = Self::new(process, elf, dwarf);
-        target.reset_inline_height()?;
+        target.notify_stop()?;
         Ok(target)
     }
 
@@ -100,20 +100,27 @@ impl Target {
 
     pub fn wait_on_signal(&mut self) -> Result<StopReason> {
         let reason = self.process.wait_on_signal()?;
-        self.reset_inline_height()?;
+        self.notify_stop()?;
         Ok(reason)
     }
 
     pub fn step_instruction(&mut self) -> Result<StopReason> {
         let reason = self.process.step_instruction()?;
-        self.reset_inline_height()?;
+        self.notify_stop()?;
         Ok(reason)
     }
 
     fn run_until_address(&mut self, address: VirtAddr) -> Result<StopReason> {
         let reason = self.process.run_until_address(address)?;
-        self.reset_inline_height()?;
+        self.notify_stop()?;
         Ok(reason)
+    }
+
+    /// Called after the inferior stops; refreshes the per-stop debugger state.
+    ///
+    /// TODO: We need to augment the inline stack information if the reason is a breakpoint on an inline function.
+    fn notify_stop(&mut self) -> Result<()> {
+        self.reset_inline_height()
     }
 }
 
@@ -459,7 +466,7 @@ impl Target {
         // Simulate step if we are currently in an inlined function
         if self.stack.inline_height() > 0 {
             self.stack.simulate_inline_step_in();
-            return Ok(StopReason::single_step());
+            return Ok(StopReason::new_for_single_step());
         }
 
         // Step until we reach a different line table entry
@@ -491,7 +498,7 @@ impl Target {
         {
             return self.run_until_address(address);
         }
-        Ok(StopReason::single_step())
+        Ok(StopReason::new_for_single_step())
     }
 
     pub fn step_over(&mut self) -> Result<StopReason> {

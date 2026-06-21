@@ -168,7 +168,7 @@ impl Registers {
 
 impl Registers {
     pub fn get_pc(&self) -> VirtAddr {
-        VirtAddr(self.read_as(&RegisterId::rip).unwrap())
+        VirtAddr(self.read_as(RegisterId::rip).unwrap())
     }
 }
 

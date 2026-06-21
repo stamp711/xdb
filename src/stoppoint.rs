@@ -55,6 +55,13 @@ impl<T: Stoppoint> StoppointCollection<T> {
             .any(|s| s.address() == address && s.is_enabled())
     }
 
+    pub fn enabled_id_at_address(&self, address: VirtAddr) -> Option<T::Id> {
+        self.stoppoints
+            .iter()
+            .find(|s| s.address() == address && s.is_enabled())
+            .map(|s| s.id())
+    }
+
     pub fn get_by_id(&self, id: T::Id) -> Result<&T> {
         self.stoppoints
             .iter()
