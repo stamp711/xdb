@@ -152,7 +152,9 @@ fn print_syscall_details(syscall: &SyscallInformation) {
 }
 
 fn get_sigtrap_desc(process: &Process, reason: &StopReason) -> Option<Cow<'static, str>> {
-    let trap = reason.trap.as_ref()?;
+    let StopReason::Trapped(trap) = reason else {
+        return None;
+    };
 
     match trap {
         TrapType::SingleStep => Some(" (single step)".into()),
@@ -187,15 +189,17 @@ fn get_sigtrap_desc(process: &Process, reason: &StopReason) -> Option<Cow<'stati
 }
 
 fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
+    // `Trapped` implies SIGTRAP; `Exited`/`Terminated` never reach this "stopped" path.
+    let signal = match reason {
+        StopReason::Stopped(signal) => *signal,
+        StopReason::Trapped(..) => Signal::SIGTRAP,
+        _ => unreachable!(),
+    };
     let process = target.process();
     let Ok(pc) = process.get_pc() else {
-        return format!("stopped by signal {}", signal_name(reason.info));
+        return format!("stopped by signal {signal:?}");
     };
-    let mut message = format!(
-        "stopped by signal {}, {:#x}",
-        signal_name(reason.info),
-        pc.addr()
-    );
+    let mut message = format!("stopped by signal {signal:?}, {:#x}", pc.addr());
 
     let location = target.current_location();
     if let Some(func) = location.function.filter(|f| !f.is_empty()) {
@@ -211,9 +215,7 @@ fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
         message += &format!(" at {file}:{}", source.line);
     }
 
-    if reason.info == Signal::SIGTRAP as u8
-        && let Some(desc) = get_sigtrap_desc(process, reason)
-    {
+    if let Some(desc) = get_sigtrap_desc(process, reason) {
         message += &desc;
     }
 
@@ -221,26 +223,24 @@ fn generate_signal_stop_reason(target: &Target, reason: &StopReason) -> String {
 }
 
 fn print_stop_reason(target: &Target, reason: &StopReason) {
-    let message = match reason.state {
-        ProcessState::Running => "is running".to_string(),
-        ProcessState::Stopped => generate_signal_stop_reason(target, reason),
-        ProcessState::Exited => format!("exited with status {}", reason.info),
-        ProcessState::Terminated => format!("terminated by signal {}", signal_name(reason.info)),
+    let message = match reason {
+        StopReason::Exited(code) => format!("exited with status {code}"),
+        StopReason::Terminated(signal) => format!("terminated by signal {signal:?}"),
+        StopReason::Stopped(_) | StopReason::Trapped(_) => {
+            generate_signal_stop_reason(target, reason)
+        }
     };
     println!("Process {} {}", target.process().pid(), message);
 
     // Print additional syscall details if this is a syscall trap
-    if reason.state == ProcessState::Stopped
-        && reason.info == Signal::SIGTRAP as u8
-        && let Some(TrapType::Syscall(syscall_info)) = reason.trap
-    {
-        print_syscall_details(&syscall_info);
+    if let StopReason::Trapped(TrapType::Syscall(syscall_info)) = reason {
+        print_syscall_details(syscall_info);
     }
 }
 
 fn handle_stop(target: &Target, reason: StopReason) {
     print_stop_reason(target, &reason);
-    if reason.state == ProcessState::Stopped {
+    if reason.process_state() == ProcessState::Stopped {
         if let Some(source) = target.current_location().source {
             print_source(&source.file.path, source.line, 3);
         } else {
@@ -271,9 +271,4 @@ fn print_source(path: &PathBuf, line: u64, context: u64) {
         let marker = if number == line { '>' } else { ' ' };
         println!("{marker} {number:>4} {text}");
     }
-}
-
-fn signal_name(info: u8) -> String {
-    Signal::try_from(i32::from(info))
-        .map_or_else(|_| info.to_string(), |signal| format!("{signal:?}"))
 }

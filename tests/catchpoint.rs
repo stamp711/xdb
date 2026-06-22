@@ -3,9 +3,8 @@ mod common;
 use std::collections::HashSet;
 
 use common::target_path;
-use nix::sys::signal::Signal;
 use xdb::syscalls::syscall_name_to_id;
-use xdb::{Process, ProcessState, SyscallCatchPolicy, TrapType};
+use xdb::{Process, StopReason, SyscallCatchPolicy, TrapType};
 
 #[test]
 fn syscall_catchpoint() {
@@ -25,17 +24,17 @@ fn syscall_catchpoint() {
 
     process.resume().unwrap();
     let reason = process.wait_on_signal().unwrap();
-    assert_eq!(reason.state, ProcessState::Stopped);
-    assert_eq!(reason.info, Signal::SIGTRAP as u8);
-    assert_eq!(reason.trap, Some(TrapType::Syscall));
-    let syscall = reason.syscall.unwrap();
+    let StopReason::Trapped(TrapType::Syscall(syscall)) = &reason else {
+        panic!("expected a syscall trap");
+    };
     assert_eq!(syscall.id, write_syscall);
     assert!(syscall.is_entry);
 
     process.resume().unwrap();
     let reason = process.wait_on_signal().unwrap();
-    assert_eq!(reason.trap, Some(TrapType::Syscall));
-    let syscall = reason.syscall.unwrap();
+    let StopReason::Trapped(TrapType::Syscall(syscall)) = &reason else {
+        panic!("expected a syscall trap");
+    };
     assert_eq!(syscall.id, write_syscall);
     assert!(!syscall.is_entry);
 }

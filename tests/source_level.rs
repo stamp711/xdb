@@ -3,8 +3,7 @@ mod common;
 use std::path::PathBuf;
 
 use common::target_path;
-use nix::sys::signal::Signal;
-use xdb::{ProcessState, Stoppoint, Target};
+use xdb::{Stoppoint, Target};
 
 fn dev_null() -> std::fs::File {
     std::fs::File::options()
@@ -73,7 +72,7 @@ fn source_level_breakpoints() {
 
     target.resume().unwrap();
     let reason = target.wait_on_signal().unwrap();
-    assert_eq!(reason.state, ProcessState::Exited);
+    assert!(reason.is_exited());
 }
 
 #[test]
@@ -88,7 +87,7 @@ fn source_level_stepping() {
     target.enable_breakpoint(main_bp).unwrap();
     target.resume().unwrap();
     let reason = target.wait_on_signal().unwrap();
-    assert_eq!(reason.info, Signal::SIGTRAP as u8);
+    assert!(reason.is_trapped());
 
     let pc = target.process().get_pc().unwrap();
     assert_eq!(target.function_name_at_address(pc), "main");

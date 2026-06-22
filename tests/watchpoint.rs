@@ -1,7 +1,6 @@
 mod common;
 
 use common::target_path;
-use nix::sys::signal::Signal;
 use xdb::{Pipe, Process, StoppointMode, VirtAddr};
 
 fn launch_anti_debugger() -> (Process, Pipe, VirtAddr) {
@@ -66,7 +65,7 @@ fn watchpoint_detects_read() {
 
     process.resume().unwrap();
     let reason = process.wait_on_signal().unwrap();
-    assert_eq!(reason.info, Signal::SIGTRAP as u8);
+    assert!(reason.is_trapped());
 
     process.resume().unwrap();
     process.wait_on_signal().unwrap();

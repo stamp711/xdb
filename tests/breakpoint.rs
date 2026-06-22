@@ -1,8 +1,7 @@
 mod common;
 
 use common::{entry_point_offset, load_address, target_path};
-use nix::sys::signal::Signal;
-use xdb::{Pipe, Process, ProcessState, Stoppoint, VirtAddr};
+use xdb::{Pipe, Process, StopReason, Stoppoint, VirtAddr};
 
 #[test]
 fn create_site() {
@@ -91,14 +90,12 @@ fn breakpoint_on_entry_point() {
     process.resume().unwrap();
     let reason = process.wait_on_signal().unwrap();
 
-    assert_eq!(reason.state, ProcessState::Stopped);
-    assert_eq!(reason.info, Signal::SIGTRAP as u8);
+    assert!(reason.is_trapped());
     assert_eq!(process.get_pc().unwrap(), entry_va);
 
     process.resume().unwrap();
     let reason = process.wait_on_signal().unwrap();
-    assert_eq!(reason.state, ProcessState::Exited);
-    assert_eq!(reason.info, 0);
+    assert!(matches!(reason, StopReason::Exited(0)));
     assert_eq!(channel.read().unwrap(), b"hello");
 }
 

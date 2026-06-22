@@ -64,54 +64,35 @@ pub struct SyscallInformation {
     pub ret: Option<i64>,
 }
 
-const SIGTRAP: u8 = Signal::SIGTRAP as u8;
-const SYSCALL_SIGTRAP: u8 = SIGTRAP | 0x80;
-
-#[derive(Clone, Debug)]
-pub struct StopReason {
-    pub state: ProcessState,
-    pub info: u8,
-    pub trap: Option<TrapType>,
+#[derive(Clone, Debug, derive_more::IsVariant)]
+pub enum StopReason {
+    Exited(i32),
+    Terminated(Signal),
+    Stopped(Signal),
+    Trapped(TrapType),
 }
 
 impl StopReason {
     /// A synthetic single-step stop, used when stepping is simulated without
     /// actually resuming the inferior (e.g. stepping through inlined frames).
     pub fn new_for_single_step() -> Self {
-        Self {
-            state: ProcessState::Stopped,
-            info: SIGTRAP,
-            trap: Some(TrapType::SingleStep),
-        }
+        Self::Trapped(TrapType::SingleStep)
     }
 
     pub fn is_step(&self) -> bool {
-        self.state == ProcessState::Stopped
-            && self.info == SIGTRAP
-            && matches!(self.trap, Some(TrapType::SingleStep))
+        matches!(self, Self::Trapped(TrapType::SingleStep))
     }
 
     pub fn is_breakpoint(&self) -> bool {
-        self.state == ProcessState::Stopped
-            && self.info == SIGTRAP
-            && self.trap.as_ref().is_some_and(|t| t.is_breakpoint())
+        matches!(self, Self::Trapped(t) if t.is_breakpoint())
     }
-}
 
-impl From<WaitStatus> for StopReason {
-    fn from(status: WaitStatus) -> Self {
-        let (state, info) = match status {
-            WaitStatus::Stopped(_, signal) => (ProcessState::Stopped, signal as u8),
-            WaitStatus::Exited(_, code) => (ProcessState::Exited, code as u8),
-            WaitStatus::Signaled(_, signal, _) => (ProcessState::Terminated, signal as u8),
-            WaitStatus::PtraceEvent(_, signal, _) => (ProcessState::Stopped, signal as u8),
-            WaitStatus::PtraceSyscall(_) => (ProcessState::Stopped, SYSCALL_SIGTRAP),
-            _ => (ProcessState::Stopped, 0),
-        };
-        Self {
-            state,
-            info,
-            trap: None,
+    /// The process phase implied by this stop event.
+    pub fn process_state(&self) -> ProcessState {
+        match self {
+            Self::Exited(_) => ProcessState::Exited,
+            Self::Terminated(_) => ProcessState::Terminated,
+            Self::Stopped(_) | Self::Trapped(_) => ProcessState::Stopped,
         }
     }
 }
@@ -342,7 +323,7 @@ impl Process {
         self.resume()?;
         let mut reason = self.wait_on_signal()?;
         if reason.is_breakpoint() && self.get_pc()? == address {
-            reason.trap = Some(TrapType::SingleStep);
+            reason = StopReason::new_for_single_step();
         }
 
         if let Some(id) = temporary {
@@ -354,38 +335,42 @@ impl Process {
     pub fn wait_on_signal(&mut self) -> Result<StopReason> {
         loop {
             let status = waitpid(self.pid, None).context("waitpid failed")?;
-            // Update the process state based on the wait status
-            let mut reason = StopReason::from(status);
-            self.state = reason.state;
 
-            if !(self.is_attached && self.state == ProcessState::Stopped) {
-                return Ok(reason);
+            // Only a traced, stopped process can be ptrace-introspected; read its
+            // registers up front so classification can consult them.
+            if self.is_attached
+                && matches!(
+                    status,
+                    WaitStatus::Stopped(..)
+                        | WaitStatus::PtraceEvent(..)
+                        | WaitStatus::PtraceSyscall(..)
+                )
+            {
+                self.read_all_registers()?;
             }
 
-            // If the process is stopped, read all registers
-            self.read_all_registers()?;
-            self.augment_stop_reason(&mut reason)?;
+            let reason = self.classify_stop(status)?;
+            self.state = reason.process_state();
 
-            // Side-effects: certain trap type require immediate action before returning to the caller.
-            match reason.trap {
-                // For software breakpoint set by us, revert pc to breakpoint address.
-                Some(TrapType::SoftwareBreakpoint(Some(_id))) => {
+            // Side-effects: certain traps require immediate action before returning.
+            match &reason {
+                // For a software breakpoint we set, revert pc to the breakpoint address.
+                StopReason::Trapped(TrapType::SoftwareBreakpoint(Some(_))) => {
                     let prev_pc = self.get_pc()? - 1;
                     self.set_pc(prev_pc)?;
                 }
 
-                // Watchpoint hit, record watchpoint data change.
-                Some(TrapType::HardwareStoppoint(Some(HardwareStop::Watchpoint(id)))) => {
-                    self.update_watchpoint_data(id)?
-                }
+                // Watchpoint hit: record the data change.
+                StopReason::Trapped(TrapType::HardwareStoppoint(Some(
+                    HardwareStop::Watchpoint(id),
+                ))) => self.update_watchpoint_data(*id)?,
 
-                Some(TrapType::Syscall(syscall_info)) => {
-                    // Skip this signal if syscall id needs not to be caught.
-                    let id = syscall_info.id;
-                    if !self.syscall_catch_policy.catches(id) {
-                        self.resume()?;
-                        continue;
-                    }
+                // A syscall we are not catching: keep running, don't surface this stop.
+                StopReason::Trapped(TrapType::Syscall(info))
+                    if !self.syscall_catch_policy.catches(info.id) =>
+                {
+                    self.resume()?;
+                    continue;
                 }
 
                 _ => {}
@@ -393,6 +378,44 @@ impl Process {
 
             return Ok(reason);
         }
+    }
+
+    /// Build the `StopReason` for a `waitpid` result. Assumes registers have
+    /// already been read for the stopped cases that inspect them.
+    fn classify_stop(&mut self, status: WaitStatus) -> Result<StopReason> {
+        Ok(match status {
+            WaitStatus::Exited(_, code) => StopReason::Exited(code),
+            WaitStatus::Signaled(_, signal, _) => StopReason::Terminated(signal),
+
+            WaitStatus::PtraceSyscall(_) => {
+                StopReason::Trapped(TrapType::Syscall(self.read_syscall_information()?))
+            }
+            WaitStatus::Stopped(_, signal) | WaitStatus::PtraceEvent(_, signal, _) => {
+                match signal {
+                    Signal::SIGTRAP => StopReason::Trapped(self.classify_sigtrap()?),
+                    other => StopReason::Stopped(other),
+                }
+            }
+
+            _ => StopReason::Trapped(TrapType::Unknown),
+        })
+    }
+
+    /// Classify a known-SIGTRAP stop from the kernel's `siginfo`.
+    fn classify_sigtrap(&self) -> Result<TrapType> {
+        let info = inferior::get_signal_info(self.pid)?;
+        Ok(match info.si_code {
+            libc::TRAP_TRACE => TrapType::SingleStep,
+            // x86-64 reports SI_KERNEL for software breakpoints, not TRAP_BRKPT.
+            libc::SI_KERNEL => {
+                let prev_pc = self.get_pc()? - 1;
+                TrapType::SoftwareBreakpoint(self.breakpoint_sites.enabled_id_at_address(prev_pc))
+            }
+            libc::TRAP_HWBKPT => {
+                TrapType::HardwareStoppoint(self.get_current_hardware_stoppoint().ok())
+            }
+            _ => TrapType::Unknown,
+        })
     }
 
     pub fn registers(&self) -> &Registers {
@@ -697,35 +720,6 @@ impl Process {
             auxv.insert(key, value);
         }
         Ok(auxv)
-    }
-
-    /// Classify a SIGTRAP stop from the kernel's `siginfo`, and for syscall
-    /// stops fill in the entry/exit details from the argument registers.
-    fn augment_stop_reason(&mut self, reason: &mut StopReason) -> Result<()> {
-        let info = inferior::get_signal_info(self.pid)?;
-
-        if reason.info == SIGTRAP {
-            reason.trap = Some(match info.si_code {
-                libc::TRAP_TRACE => TrapType::SingleStep,
-                // x86-64 reports SI_KERNEL for software breakpoints, not TRAP_BRKPT.
-                libc::SI_KERNEL => {
-                    let prev_pc = self.get_pc()? - 1;
-                    TrapType::SoftwareBreakpoint(
-                        self.breakpoint_sites.enabled_id_at_address(prev_pc),
-                    )
-                }
-                libc::TRAP_HWBKPT => {
-                    TrapType::HardwareStoppoint(self.get_current_hardware_stoppoint().ok())
-                }
-                _ => TrapType::Unknown,
-            });
-        } else if reason.info == SYSCALL_SIGTRAP {
-            reason.info = SIGTRAP; // Remove the 0x80
-            reason.trap = Some(TrapType::Syscall(self.read_syscall_information()?));
-        } else {
-            reason.trap = Some(TrapType::Unknown);
-        }
-        Ok(())
     }
 
     fn read_syscall_information(&mut self) -> Result<SyscallInformation> {
