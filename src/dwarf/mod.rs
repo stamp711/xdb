@@ -21,7 +21,7 @@ use memmap2::Mmap;
 use crate::elf::Elf;
 use crate::error::{Error, Result};
 use crate::types::FileAddr;
-use cfi::{BaseAddresses, CallFrameInformation, UnwindRow};
+use cfi::{BaseAddresses, CallFrameInformation, UnwindTableRow};
 use constants::*;
 use die::{DieHandle, DieRef, parse_die};
 use line_table::LineTable;
@@ -92,7 +92,7 @@ impl Dwarf {
     }
 
     #[expect(dead_code)]
-    pub(crate) fn unwind_row(&self, pc: FileAddr) -> Result<UnwindRow> {
+    pub(crate) fn unwind_row(&self, pc: FileAddr) -> Result<UnwindTableRow> {
         self.cfi
             .as_ref()
             .ok_or_else(|| Error::new("Object has no call frame information"))?

@@ -1,7 +1,7 @@
 #![expect(dead_code)]
 
 use crate::VirtAddr;
-use crate::dwarf::cfi::{CfaRule, RegisterRule, UnwindRow};
+use crate::dwarf::cfi::{CfaRule, RegisterRule, UnwindTableRow};
 use crate::dwarf::die::DieHandle;
 use crate::dwarf::line_table::SourceLocation;
 use crate::error::{Error, Result};
@@ -96,12 +96,30 @@ pub struct Frame {
     regs: Registers,
 }
 
+impl Frame {
+    pub fn new(
+        inlined: bool,
+        pc: VirtAddr,
+        func_die: Option<DieHandle>,
+        location: Option<SourceLocation>,
+        regs: Registers,
+    ) -> Self {
+        Self {
+            inlined,
+            pc,
+            func_die,
+            location,
+            regs,
+        }
+    }
+}
+
 /// Apply `row` to the current frame's `current` registers, returning the
 /// caller's registers. `read` reads 8 bytes of inferior memory at an address,
 /// used by the `Offset` rule.
 pub(crate) fn unwind_registers(
     current: &Registers,
-    row: &UnwindRow,
+    row: &UnwindTableRow,
     read: impl Fn(u64) -> Result<u64>,
 ) -> Result<Registers> {
     let mut unwond = current.clone();

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 
 use nix::unistd::Pid;
 
+use crate::Registers;
 use crate::breakpoint::{Breakpoint, BreakpointId, BreakpointKind};
 use crate::disassembler::Disassembler;
 use crate::dwarf::Dwarf;
@@ -13,7 +14,7 @@ use crate::elf::Elf;
 use crate::error::{Error, Result};
 use crate::process::{Process, ProcessState, StopReason};
 use crate::register_info::RegisterId;
-use crate::stack::Stack;
+use crate::stack::{Frame, Stack, unwind_registers};
 use crate::stoppoint::Stoppoint;
 use crate::types::{FileAddr, VirtAddr};
 
@@ -418,7 +419,7 @@ impl Target {
     }
 }
 
-// -- inline stack --
+// -- stack --
 impl Target {
     /// Get the inline stack at the current pc.
     ///
@@ -457,6 +458,89 @@ impl Target {
         };
 
         Ok(())
+    }
+
+    /// Walk the call stack from live registers.
+    /// Expands the inline DW_TAG_inlined_subroutine DIEs.
+    fn unwind(&self) -> Result<Vec<Frame>> {
+        let Some(mut pcf) = self.get_pc_file_addr() else {
+            return Ok(Vec::new());
+        };
+
+        // Source position from the line table at an arbitrary file address.
+        let line_source = |fa: FileAddr| -> Option<SourceLocation> {
+            let cu = self.dwarf.unit_containing_address(fa)?;
+            let table = self.dwarf.line_table(cu)?;
+            let entry = table.entry_at_address(&self.dwarf, fa)?;
+            Some(SourceLocation {
+                file: table.file(entry.file_index).clone(),
+                line: entry.line,
+            })
+        };
+
+        let mut regs = self.process.registers().clone();
+        let mut frames = Vec::new();
+
+        loop {
+            // For the innermost frame this is the live pc; for callers it's the
+            // return address.
+            let pc = regs.get_pc();
+
+            // Outermost (non-inlined) function first, then each inlined subroutine.
+            let inline_stack = self.dwarf.inline_stack_at_address(pcf);
+            if inline_stack.is_empty() {
+                frames.push(Frame::new(false, pc, None, line_source(pcf), regs.clone()));
+            } else {
+                // Emit innermost (most inlined) first to keep frames innermost => outermost.
+                for i in (0..inline_stack.len()).rev() {
+                    let handle = inline_stack[i];
+                    // Index 0 is the physical DW_TAG_subprogram; the rest are inlined.
+                    let inlined = i != 0;
+                    // A frame's source line is the call site recorded on its inlined
+                    // callee; the innermost body falls back to the line table.
+                    let location = if i + 1 < inline_stack.len() {
+                        self.dwarf.die(inline_stack[i + 1]).location().ok()
+                    } else {
+                        line_source(pcf)
+                    };
+                    frames.push(Frame::new(
+                        inlined,
+                        pc,
+                        Some(handle),
+                        location,
+                        regs.clone(),
+                    ));
+                }
+            }
+
+            // Step to the caller using the CFI at this frame's pc.
+            let Ok(caller) = self.unwind_one(pcf, &regs) else {
+                break;
+            };
+            let Ok(ret) = caller.read_as::<u64>(RegisterId::rip) else {
+                break;
+            };
+            if ret == 0 {
+                break;
+            }
+            // The return address points just past the call; look the caller up at
+            // the call instruction itself.
+            let Some(caller_pcf) = self.virt_addr_to_file(VirtAddr(ret - 1)) else {
+                break;
+            };
+            regs = caller;
+            pcf = caller_pcf;
+        }
+
+        Ok(frames)
+    }
+
+    /// Apply CFI at `pc` to `regs`, return caller's regs.
+    fn unwind_one(&self, pc: FileAddr, regs: &Registers) -> Result<Registers> {
+        let row = self.dwarf.unwind_row(pc)?;
+        unwind_registers(regs, &row, |addr| {
+            self.process.read_memory_as::<u64>(VirtAddr(addr))
+        })
     }
 }
 

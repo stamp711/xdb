@@ -609,13 +609,17 @@ impl UnwindContext {
     }
 }
 
-pub(crate) struct UnwindRow {
+pub(crate) struct UnwindTableRow {
     pub(crate) cfa_rule: CfaRule,
     pub(crate) register_rules: RegisterRules,
 }
 
 impl CallFrameInformation {
-    pub(crate) fn unwind_row_for_addr(&self, dwarf: &Dwarf, pc: FileAddr) -> Result<UnwindRow> {
+    pub(crate) fn unwind_row_for_addr(
+        &self,
+        dwarf: &Dwarf,
+        pc: FileAddr,
+    ) -> Result<UnwindTableRow> {
         let fde = self.fde_for_addr(dwarf, pc)?;
 
         if pc < fde.initial_location
@@ -630,7 +634,7 @@ impl CallFrameInformation {
         ctx.run_cie(eh_frame, &fde.cie)?;
         ctx.run_fde(eh_frame, &fde, Some(pc.addr()))?;
 
-        Ok(UnwindRow {
+        Ok(UnwindTableRow {
             cfa_rule: ctx
                 .cfa_rule
                 .ok_or_else(|| Error::new("CFA rule not defined at PC"))?,
